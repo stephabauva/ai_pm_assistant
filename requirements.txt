@@ -1,3 +1,8 @@
-fastapi
+fastapi[all]
 python-fasthtml
+redis
+python-jose[cryptography]
+httpx-oauth
 pytest
+pytest-asyncio
+python-dotenv
