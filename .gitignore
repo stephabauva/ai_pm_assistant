@@ -11,3 +11,5 @@ ai_pm_assistant/
 .roo/
 tests/.sesskey
 .sesskey
+
+bugs.txt
