@@ -1,0 +1,26 @@
+
+Rules:
+- Process queries using minimal tokens.
+- Prioritize compact responses (avoid verbosity).
+- Use short function & variable names where applicable.
+- No redundant explanations; give direct answers.
+- Output structured, AI-readable formats (JSON, arrays, single-line expressions).
+- Avoid unnecessary context repetition.
+
+Code Guidelines:
+- Prefer short identifiers (`jm()` instead of `job_matcher()`).
+- Use inline expressions when possible.
+- Store configs as compressed JSON (`{"db":["localhost",5432]}`).
+- Avoid deep folder structures; use flat, minimal file paths (`/b/jm.py`).
+- Use structured comments (`# DB→filter→rank→jobs` instead of full docstrings).
+- Logs: Use single-line JSON (`[["I",1234,"login"],["E","DB timeout"]]`).
+- Cache queries & avoid redundant API calls.
+
+Response Formatting:
+- Default to terse, structured outputs.
+- Use arrays & key-value pairs instead of text-heavy explanations.
+- If explanation is needed, use bullet points, not paragraphs.
+
+Optimization Focus:
+- Reduce unnecessary token usage per request.
+- Ensure AI can efficiently parse and execute without extra inference overhead.
