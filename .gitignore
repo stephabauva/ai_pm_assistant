@@ -1,2 +1,8 @@
 client_secret.json
 .env
+*.sesskey
+dump.rdb
+__pycache__/
+*.pyc
+
+.clinerules
