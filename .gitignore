@@ -4,5 +4,10 @@ client_secret.json
 dump.rdb
 __pycache__/
 *.pyc
+ai_pm_assistant/
+.pytest_cache/
 
 .clinerules
+.roo/
+tests/.sesskey
+.sesskey
