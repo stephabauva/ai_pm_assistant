@@ -5,6 +5,8 @@ from starlette.requests import Request
 # Tailwind CSS CDN (for development; consider a local build for production)
 tailwind_cdn = Link(rel="stylesheet", href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css")
 
+# No JavaScript needed for step animation as it's handled in the analysis.py file
+
 def add_dashboard_routes(rt, get_user):
     @rt('/')
     async def dash(r: Request, email: str = Depends(get_user)):
@@ -73,9 +75,12 @@ def add_dashboard_routes(rt, get_user):
                             _="on click set my innerHTML to 'Analyzing...'"
                         ),
                         Span("⏳", cls="htmx-indicator text-gray-500 ml-2", style="display:none;"),
-                        hx_post="/analyze", hx_target="#resp", hx_swap="innerHTML", hx_include="[name='model']"
+                        hx_post="/analyze",
+                        hx_target="#resp",
+                        hx_swap="innerHTML",
+                        hx_include="[name='model']"
                     ),
-                    Div(id="resp", cls="mt-6 p-4 bg-white rounded-lg shadow-md"),
+                    Div(id="resp", cls="mt-6"),
                     cls="max-w-lg mx-auto p-6 bg-gray-100 rounded-xl shadow-lg"
                 ),
                 cls="container mx-auto mt-8"

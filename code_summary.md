@@ -27,7 +27,10 @@ This application is an AI-Powered Product Management Assistant for competitive a
   - Features:
     * Structured plain text output from Pydantic models with safe data access
     * Async API calls to LLM providers
-    * HTMX-powered UI updates
+    * HTMX-powered UI updates with real-time analysis feedback
+    * Two-phase analysis process with immediate loading feedback
+    * Step-by-step loading animation with green progress indicators
+    * Visual feedback showing real-time analysis progress
     * Enhanced debug mode for troubleshooting API responses
     * Improved error handling for missing or malformed data
     * HTML-free response formatting for consistent display
