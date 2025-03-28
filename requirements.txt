@@ -6,3 +6,6 @@ httpx-oauth
 pytest
 pytest-asyncio
 python-dotenv
+requests
+httpx
+pytest-mock

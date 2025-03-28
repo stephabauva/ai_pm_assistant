@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from main import app, redis
+from main import app, redis, llm
 
 client = TestClient(app)
 
@@ -48,11 +48,22 @@ async def test_dash_auth(mock_req):
     assert "hx-post': '/analyze'" in res_str
     assert "id': 'resp'" in res_str
 
-@pytest.mark.asyncio
-async def test_analyze():
+@pytest.mark.parametrize("q, exp", [
+    ("CRM market", "• Salesforce\n• HubSpot\n• Competitor 3\n• Competitor 4\n- Insight: Focus on X"),
+    ("test query", "• Comp1\n• Comp2\n• Comp3\n- Insight: Leverage Y")
+])
+def test_analyze(q, exp, mocker):
+    mocker.patch('main.llm', return_value=exp)
+    r = client.post('/analyze', data={'q': q})
+    assert r.status_code == 200
+    assert exp in r.text
+    assert 'id="resp"' in r.text
+
+def test_analyze_err(mocker):
+    mocker.patch('main.llm', return_value="Error: LLM unavailable")
     r = client.post('/analyze', data={'q': 'test query'})
     assert r.status_code == 200
-    assert "Analyzing competitors... (static response)" in r.text
+    assert "Error: LLM unavailable" in r.text
     assert 'id="resp"' in r.text
 
 def test_login():
