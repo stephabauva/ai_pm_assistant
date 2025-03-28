@@ -9,6 +9,7 @@ ai_pm_assistant/
 
 .clinerules
 .roo/
+.rooignore
 tests/.sesskey
 .sesskey
 
