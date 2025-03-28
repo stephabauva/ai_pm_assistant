@@ -50,7 +50,15 @@ def add_dashboard_routes(rt, get_user):
                         ),
                         # Query input and submit button
                         Div(
-                            Label("Enter your competitive analysis query:", for_="q", cls="block text-sm font-medium text-gray-700 mb-1"),
+                            Div(
+                                Label("Enter your competitive analysis query:", for_="q", cls="block text-sm font-medium text-gray-700 mb-1"),
+                                Span(
+                                    "Use sample",
+                                    cls="ml-1 text-[8px] bg-gray-100 text-gray-500 py-0 px-0.5 rounded-sm border border-gray-200 hover:bg-gray-200 transition duration-200 leading-tight cursor-pointer",
+                                    onclick="document.getElementById('q').value='Analyse crm market competitors'; return false;"
+                                ),
+                                cls="flex items-center"
+                            ),
                             Input(
                                 id="q", name="q", placeholder="e.g., Analyze CRM market competitors",
                                 cls="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"

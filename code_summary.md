@@ -17,6 +17,7 @@ This application is an AI-Powered Product Management Assistant for competitive a
     * Tailwind CSS styling
     * Radio button model selection (Ollama, LMStudio, Gemini)
     * Modern UI components
+    * "Use sample" button to populate query field with example text
     * Information about Pydantic AI integration
   - Purpose: Displays the UI for selecting LLMs and submitting queries.
 
