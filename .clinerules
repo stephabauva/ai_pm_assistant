@@ -1,4 +1,6 @@
 
+First, look at @code_summary.md to understand the codebase, if changes are made, update this file if necessary.
+
 Rules:
 - Process queries using minimal tokens.
 - Prioritize compact responses (avoid verbosity).

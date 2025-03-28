@@ -9,3 +9,5 @@ python-dotenv
 requests
 httpx
 pytest-mock
+pydantic
+pydantic-ai

@@ -56,22 +56,21 @@ async def test_dash_auth(mock_req):
     ("test query", "• Comp1\n• Comp2\n• Comp3\n- Insight: Leverage Y")
 ])
 def test_analyze(q, exp, mocker):
-    mocker.patch('analysis.llm', return_value=exp)  # Update the patch to target analysis.llm
-    r = client.post('/analyze', data={'q': q, 'local_llm': 'ollama', 'cloud_llm': ''})
+    mocker.patch('analysis.llm', return_value=exp)
+    r = client.post('/analyze', data={'q': q, 'model': 'ollama'})
     assert r.status_code == 200
-    assert exp in r.text  # Check rendered HTML
+    assert exp in r.text
     assert 'id="resp"' in r.text
-    assert 'id="local_llm"' in r.text  # Verify dropdowns are returned
-    assert 'id="cloud_llm"' in r.text
+    assert 'name="model"' in r.text  # Check for radio buttons
+    assert 'value="ollama"' in r.text
 
 def test_analyze_err(mocker):
-    mocker.patch('analysis.llm', return_value="Error: LLM unavailable")  # Update the patch to target analysis.llm
-    r = client.post('/analyze', data={'q': 'test query', 'local_llm': 'ollama', 'cloud_llm': ''})
+    mocker.patch('analysis.llm', return_value="Error: LLM unavailable")
+    r = client.post('/analyze', data={'q': 'test query', 'model': 'ollama'})
     assert r.status_code == 200
     assert "Error: LLM unavailable" in r.text
     assert 'id="resp"' in r.text
-    assert 'id="local_llm"' in r.text
-    assert 'id="cloud_llm"' in r.text
+    assert 'name="model"' in r.text  # Check for radio buttons
 
 def test_login():
     r = client.get('/login')
