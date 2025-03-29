@@ -1,57 +1,44 @@
 from fasthtml.common import *
-from redis import Redis
+# Removed Redis import, as it's unused globally
 from auth import add_auth_routes
 from dashboard import add_dashboard_routes
 from analysis import add_analysis_routes
 from utils import get_user
+import uvicorn # Import uvicorn directly for serve function
+import logging
+# Import the global settings instance
+from config import settings
 
-app, rt = fast_app(with_session=True)
-redis = Redis(host='localhost', port=6379, db=0)
+# Setup basic logging configuration if not already set elsewhere
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 
-# Add CSS (could move to static/styles.css)
-css = Style("""
-    .card {border: 1px solid #ddd; padding: 1.5rem; border-radius: 8px; max-width: 450px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);}
-    .btn {padding: 0.6rem 1.2rem; background: #007bff; color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-weight: 500; transition: background 0.2s;}
-    .btn:hover {background: #0069d9;}
-    .model-group {margin-bottom: 1.2rem;}
-    .model-group > label {display: block; margin-bottom: 0.4rem; font-weight: 500; color: #444;}
-    .model-group > select {
-        padding: 0.6rem;
-        margin: 0.3rem 0;
-        width: 100%;
-        border: 2px solid #ddd;
-        border-radius: 4px;
-        background: #f8f9fa;
-        color: #333;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .model-group > select:hover {
-        border-color: #aaa;
-    }
-    .selected {
-        background-color: #f0f8ff;
-        border-color: #007bff !important;
-        box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-    }
-    input[type="text"] {
-        padding: 0.6rem;
-        margin: 0.5rem 0 1rem;
-        width: 100%;
-        border: 2px solid #ddd;
-        border-radius: 4px;
-    }
-    input[type="text"]:focus {
-        border-color: #007bff;
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
-    }
-""")  # Same as original
+# Initialize FastHTML app with session middleware
+# Use the SESSION_SECRET_KEY from settings
+app, rt = fast_app(
+    with_session=True,
+    secret_key=settings.session_secret_key.get_secret_value()
+)
 
-# Register routes
+# Removed global Redis instance initialization
+# Removed embedded CSS - should be moved to a static file
+
+# Register routes from other modules
 add_auth_routes(rt)
 add_dashboard_routes(rt, get_user)
 add_analysis_routes(rt, get_user)
 
+# --- Serve the application ---
+# Define the serve function to use settings
+def serve():
+    logger.info(f"Starting server on {settings.app_host}:{settings.app_port}")
+    uvicorn.run(
+        app,
+        host=settings.app_host,
+        port=settings.app_port,
+        # Consider adding reload=True based on an environment flag for development
+        # reload=(os.getenv("APP_ENV", "production") == "development")
+    )
+
 if __name__ == '__main__':
-    serve(host='localhost', port=5001)
+    serve()

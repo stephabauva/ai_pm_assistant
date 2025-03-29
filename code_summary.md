@@ -12,7 +12,6 @@ This application is an AI-Powered Product Management Assistant for competitive a
   - `add_auth_routes(rt)`: Registers login and callback routes.
 
 - **`dashboard.py`**: Renders the main dashboard interface.
-
   - `add_dashboard_routes(rt, get_user)`: Adds the dashboard route with model selection UI.
 
 - **`analysis.py`**: Processes analysis queries with LLMs.
@@ -21,7 +20,11 @@ This application is an AI-Powered Product Management Assistant for competitive a
 
 - **`ai_agent.py`**: Implements Pydantic models and API clients.
   - `AIClient`: Client for making API calls to different LLM providers.
+    - `analyze_competition`: Method to analyze competition using structured outputs.
   - `CompetitiveAnalysis`: Pydantic model for structured competitive analysis.
 
 - **`utils.py`**: Utility functions.
   - `get_user(r: Request)`: Dependency to verify user authentication.
+
+- **`config.py`**: Application configuration using `pydantic-settings`.
+  - Defines `Settings` class for managing application settings from environment variables and `.env` file.
