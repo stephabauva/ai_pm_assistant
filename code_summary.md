@@ -52,8 +52,8 @@ This application is an AI-Powered Product Management Assistant for competitive a
 
 - **`utils.py`**: Utility functions and constants.
   - `get_user(r: Request)`: Dependency to verify user authentication.
-  - `SP`: System prompt for the LLM with explicit instructions to avoid HTML output.
   - Purpose: Shared utilities and configuration.
+  - Note: The `SP` variable has been moved to `ai_agent.py` for centralized prompt management.
 
 ## Key Functionalities
 

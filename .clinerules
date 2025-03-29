@@ -1,7 +1,7 @@
 
 First, look at @code_summary.md to understand the codebase, if changes are made, update this file if necessary.
 
-Rules:
+<!-- Rules:
 - Process queries using minimal tokens.
 - Prioritize compact responses (avoid verbosity).
 - Use short function & variable names where applicable.
@@ -25,4 +25,4 @@ Response Formatting:
 
 Optimization Focus:
 - Reduce unnecessary token usage per request.
-- Ensure AI can efficiently parse and execute without extra inference overhead.
+- Ensure AI can efficiently parse and execute without extra inference overhead. -->

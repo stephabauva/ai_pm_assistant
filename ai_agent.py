@@ -1,14 +1,22 @@
+# ---- File: ai_agent.py ----
 
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-from pydantic_ai import Agent
-import httpx
 import os
+import httpx
+import json
+import re  # Keep re for potential minor cleanup if needed, but not for core parsing
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
-# Models for structured outputs
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
+
+# --- Pydantic Models for Structured Output ---
+
 class CompetitorInfo(BaseModel):
     name: str = Field(..., description="Name of the competitor")
     strengths: List[str] = Field(..., description="Key strengths of the competitor")
@@ -24,412 +32,307 @@ class MarketTrend(BaseModel):
     threat: Optional[str] = Field(None, description="Potential threat this presents")
 
 class CompetitiveAnalysis(BaseModel):
-    """Analyze competitors and market trends for a product."""
+    """Structured analysis of competitors and market trends for a product."""
     competitors: List[CompetitorInfo] = Field(..., description="List of key competitors and their analysis")
     market_trends: List[MarketTrend] = Field(..., description="Key market trends relevant to the product")
     recommendations: List[str] = Field(..., description="Strategic recommendations based on the analysis")
     summary: str = Field(..., description="Executive summary of the competitive landscape")
 
+    # Add an example for the LLM prompt
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "competitors": [
+                        {
+                            "name": "ExampleCorp",
+                            "strengths": ["Large user base", "Strong brand recognition"],
+                            "weaknesses": ["Slow innovation cycle", "Complex pricing"],
+                            "market_share": "Approx. 30%",
+                            "key_features": ["Core Platform", "Advanced Analytics Module"],
+                            "pricing": "Starts at $100/user/month"
+                        }
+                    ],
+                    "market_trends": [
+                        {
+                            "trend": "AI Integration in Business Tools",
+                            "impact": "Increased demand for automated insights and efficiency.",
+                            "opportunity": "Develop AI-powered features.",
+                            "threat": "Competitors launching AI features faster."
+                        }
+                    ],
+                    "recommendations": [
+                        "Invest R&D in AI capabilities.",
+                        "Simplify the pricing structure.",
+                        "Target niche markets with specialized features."
+                    ],
+                    "summary": "The market is shifting towards AI integration, where ExampleCorp faces challenges in innovation speed despite its strong market presence."
+                }
+            ]
+        }
+    }
+
+
+# --- Centralized System Prompt ---
+
+# Note: We ask for JSON output directly matching the Pydantic schema.
+# Create the system prompt with proper escaping for JSON schema
+schema_json = json.dumps(CompetitiveAnalysis.model_json_schema(), indent=2)
+example_json = json.dumps(CompetitiveAnalysis.model_config['json_schema_extra']['examples'][0], indent=2)
+
+SYSTEM_PROMPT = """You are a Competitive Analysis Agent specialized in market research and competitor analysis.
+Your task is to analyze the user's query and provide structured insights about competitors and market trends.
+Provide factual information and strategic recommendations.
+
+CRITICAL INSTRUCTION: You MUST respond ONLY with a valid JSON object that strictly adheres to the following Pydantic schema. Do NOT include any introductory text, explanations, apologies, or markdown formatting (like ```json ... ```) around the JSON object. Your entire response must be the JSON object itself.
+
+Pydantic Schema:
+```json
+{0}
+```
+
+Example of the expected JSON format (use this structure):
+```json
+{1}
+```
+
+Analyze the user query below and return the JSON object.
+
+User Query: {{user_query}}
+"""
+
+# Format the prompt template with the JSON schema and example
+SYSTEM_PROMPT = SYSTEM_PROMPT.format(schema_json, example_json)
+
+
 class AIClient:
-    """Client for making AI API calls with different models."""
-    
+    """Client for making AI API calls, expecting structured JSON output."""
+
     def __init__(self):
-        self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        self.lmstudio_url = os.getenv("LMSTUDIO_URL", "http://localhost:1234")
-    
-    async def call_gemini(self, prompt: str) -> str:
-        """Call Gemini API."""
+        self.lmstudio_url = os.getenv("LMSTUDIO_URL", "http://localhost:1234/v1") # Ensure /v1
+        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3") # Default model
+        self.lmstudio_model = os.getenv("LMSTUDIO_MODEL") # No default, needs to be set in .env
+        self.gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-1.5-flash-latest") # Use latest flash
+
         if not self.gemini_api_key:
-            print("[ERROR] Gemini API key not configured")
-            return "Error: Gemini API key not configured"
-            
-        print(f"[DEBUG] Using Gemini API key: {self.gemini_api_key[:5]}...{self.gemini_api_key[-3:]}")
-            
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+            logger.warning("Gemini API key not found in environment variables. Gemini functionality will be disabled.")
+        if not self.lmstudio_model:
+             logger.warning("LMSTUDIO_MODEL not set in environment variables. LMStudio functionality may be limited.")
+
+    def _prepare_prompt(self, query: str) -> str:
+        """Formats the prompt with the user query."""
+        # The SYSTEM_PROMPT is already pre-formatted with schema and example
+        # Just need to replace the user_query placeholder
+        return SYSTEM_PROMPT.replace("{{user_query}}", query)
+
+    async def call_gemini(self, prompt: str) -> str:
+        """Call Gemini API, requesting JSON output."""
+        if not self.gemini_api_key:
+            logger.error("Gemini API key is not configured.")
+            return json.dumps({"error": "Gemini API key not configured"}) # Return JSON error
+
+        # Ensure the model name starts with "models/" if it doesn't already
+        model_name = self.gemini_model
+        if not model_name.startswith("models/"):
+            model_name = f"models/{model_name}"
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent"
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.gemini_api_key
         }
+        # Request JSON output explicitly
         data = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.7,
+                "temperature": 0.5, # Slightly lower temp might help with structured output
                 "topK": 40,
                 "topP": 0.95,
-                "maxOutputTokens": 2048
+                "maxOutputTokens": 3072, # Increased max tokens for potentially larger JSON
+                "response_mime_type": "application/json", # CRITICAL: Ask Gemini for JSON
             }
         }
-        
+
         async with httpx.AsyncClient() as client:
             try:
-                print(f"[DEBUG] Sending request to Gemini API with prompt length: {len(prompt)}")
-                response = await client.post(url, headers=headers, json=data, timeout=60.0)
-                print(f"[DEBUG] Gemini API response status: {response.status_code}")
+                logger.info(f"Sending request to Gemini API ({self.gemini_model}) Prompt length: {len(prompt)}")
+                response = await client.post(url, headers=headers, json=data, timeout=120.0) # Increased timeout
+                logger.info(f"Gemini API response status: {response.status_code}")
+
                 if response.status_code == 200:
-                    result = response.json()
-                    print(f"[DEBUG] Gemini API response JSON: {result.keys()}")
-                    
-                    # Check if we have the expected response structure
-                    if "candidates" not in result or not result["candidates"]:
-                        return f"Error: Unexpected Gemini API response structure: {result}"
-                    
-                    if "content" not in result["candidates"][0] or "parts" not in result["candidates"][0]["content"]:
-                        return f"Error: Unexpected Gemini API response structure: {result}"
-                    
-                    # Extract text content
-                    text = result["candidates"][0]["content"]["parts"][0]["text"]
-                    
-                    # Check if response looks like HTML and extract text if needed
-                    if (text.strip().startswith("<") and ">" in text) or "<div" in text or "<h3" in text or "<p" in text or "class=" in text:
-                        # Log the issue
-                        print(f"WARNING: Gemini returned HTML-like content: {text[:100]}...")
-                        
-                        # Try to extract text from HTML or use fallback
-                        try:
-                            # Remove HTML tags to get plain text
-                            import re
-                            
-                            # First, try to extract the actual content sections if they exist
-                            summary_match = re.search(r'Executive Summary[^<]*</h3>\s*<p>([^<]+)</p>', text)
-                            summary = summary_match.group(1).strip() if summary_match else ""
-                            
-                            # Extract competitor information
-                            competitor_sections = re.findall(r'<h4[^>]*>([^<]+)</h4>.*?Market Share:\s*([^<]+).*?Strengths:.*?<ul[^>]*>(.*?)</ul>.*?Weaknesses:.*?<ul[^>]*>(.*?)</ul>.*?Key Features:.*?<ul[^>]*>(.*?)</ul>', text, re.DOTALL)
-                            
-                            competitors_text = ""
-                            for comp in competitor_sections:
-                                name = comp[0].strip()
-                                market_share = comp[1].strip()
-                                
-                                # Extract list items
-                                strengths = ", ".join([s.strip() for s in re.findall(r'<li>([^<]+)</li>', comp[2])])
-                                weaknesses = ", ".join([w.strip() for w in re.findall(r'<li>([^<]+)</li>', comp[3])])
-                                features = ", ".join([f.strip() for f in re.findall(r'<li>([^<]+)</li>', comp[4])])
-                                
-                                competitors_text += f"\n{name}\n- Market Share: {market_share}\n- Strengths: {strengths}\n- Weaknesses: {weaknesses}\n- Key Features: {features}\n"
-                            
-                            # Extract market trends
-                            trend_sections = re.findall(r'<p class="font-semibold">([^<]+)</p>\s*<p[^>]*>Impact:\s*([^<]+)</p>', text)
-                            
-                            trends_text = ""
-                            for trend in trend_sections:
-                                trend_name = trend[0].strip()
-                                impact = trend[1].strip()
-                                trends_text += f"\n{trend_name}\n- Impact: {impact}\n"
-                            
-                            # Extract recommendations
-                            recommendations = re.findall(r'<li>([^<]+)</li>', text[text.find("Recommendations"):]) if "Recommendations" in text else []
-                            recommendations_text = "\n".join([f"- {r.strip()}" for r in recommendations])
-                            
-                            # If we successfully extracted structured content
-                            if summary or competitors_text or trends_text or recommendations_text:
-                                return f"""
-SUMMARY:
-{summary or "Competitive analysis summary extracted from HTML response"}
+                    # Gemini should return JSON directly because of response_mime_type
+                    # Sometimes it might still wrap it, attempt to extract if necessary
+                    try:
+                        result = response.json()
+                        # Standard Gemini structure check
+                        if "candidates" in result and result["candidates"] and "content" in result["candidates"][0] and "parts" in result["candidates"][0]["content"]:
+                            raw_text = result["candidates"][0]["content"]["parts"][0]["text"]
+                            # The raw_text *should* be the JSON string
+                            logger.info(f"Gemini raw response text received (first 200 chars): {raw_text[:200]}...")
+                            # Basic cleanup: remove potential markdown fences
+                            cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_text.strip(), flags=re.MULTILINE)
+                            return cleaned_text
+                        else:
+                            logger.error(f"Unexpected Gemini API response structure: {result}")
+                            return json.dumps({"error": "Unexpected Gemini API response structure", "details": result})
+                    except json.JSONDecodeError:
+                         # If the outer response isn't JSON (unexpected)
+                         logger.error(f"Gemini response was not valid JSON. Status: {response.status_code}, Response: {response.text[:500]}")
+                         return json.dumps({"error": "Gemini response body was not valid JSON", "details": response.text[:500]})
+                    except Exception as e:
+                         logger.error(f"Error processing Gemini response JSON: {e}", exc_info=True)
+                         return json.dumps({"error": f"Error processing Gemini response: {str(e)}", "details": response.text[:500]})
 
-COMPETITORS:
-{competitors_text or "Competitor information extracted from HTML response"}
-
-MARKET TRENDS:
-{trends_text or "Market trend information extracted from HTML response"}
-
-RECOMMENDATIONS:
-{recommendations_text or "- Focus on product differentiation"}
-"""
-                            
-                            # If structured extraction failed, fall back to simple tag removal
-                            clean_text = re.sub(r'<[^>]*>', ' ', text)
-                            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-                            
-                            if len(clean_text) > 100:
-                                # Format the extracted text properly
-                                return f"""
-SUMMARY:
-{clean_text[:200]}...
-
-COMPETITORS:
-Competitor 1:
-- Strengths: Strong market presence
-- Weaknesses: Limited innovation
-- Key Features: Core product
-
-MARKET TRENDS:
-Digital transformation:
-- Impact: Changing customer expectations
-
-RECOMMENDATIONS:
-- Focus on product differentiation
-"""
-                        except Exception as e:
-                            print(f"Error extracting text from HTML: {str(e)}")
-                        
-                        # Return a fallback structured response
-                        return """
-SUMMARY:
-Competitive analysis summary
-
-COMPETITORS:
-Competitor 1:
-- Strengths: Strong market presence
-- Weaknesses: Limited innovation
-- Key Features: Core product
-
-MARKET TRENDS:
-Digital transformation:
-- Impact: Changing customer expectations
-
-RECOMMENDATIONS:
-- Focus on product differentiation
-"""
-                    return text
                 else:
-                    return f"Error: {response.status_code} - {response.text}"
+                    logger.error(f"Gemini API Error: {response.status_code} - {response.text}")
+                    return json.dumps({"error": f"Gemini API Error: {response.status_code}", "details": response.text})
+            except httpx.ReadTimeout:
+                 logger.error("Gemini API request timed out.")
+                 return json.dumps({"error": "Gemini API request timed out"})
             except Exception as e:
-                return f"Error calling Gemini API: {str(e)}"
-    
+                logger.error(f"Error calling Gemini API: {e}", exc_info=True)
+                return json.dumps({"error": f"Exception calling Gemini API: {str(e)}"})
+
     async def call_ollama(self, prompt: str) -> str:
-        """Call Ollama API."""
+        """Call Ollama API, expecting JSON output based on prompt."""
         url = f"{self.ollama_url}/api/generate"
         data = {
-            "model": "llama3",
+            "model": self.ollama_model,
             "prompt": prompt,
-            "stream": False
-        }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(url, json=data, timeout=60.0)
-                if response.status_code == 200:
-                    result = response.json()
-                    if isinstance(result, dict):
-                        return result.get("response", "")
-                    return ""
-                else:
-                    return f"Error: {response.status_code} - {response.text}"
-            except Exception as e:
-                return f"Error: {str(e)}"
-    
-    async def call_lmstudio(self, prompt: str) -> str:
-        """Call LMStudio API."""
-        url = f"{self.lmstudio_url}/v1/completions"
-        data = {
-            "prompt": prompt,
-            "max_tokens": 2048,
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "stream": False
-        }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(url, json=data, timeout=60.0)
-                if response.status_code == 200:
-                    result = response.json()
-                    if isinstance(result, dict) and "choices" in result:
-                        choices = result["choices"]
-                        if isinstance(choices, list) and len(choices) > 0:
-                            return choices[0].get("text", "")
-                    return ""
-                else:
-                    return f"Error: {response.status_code} - {response.text}"
-            except Exception as e:
-                return f"Error: {str(e)}"
-    
-    async def analyze_competition(self, query: str, model: str = "ollama") -> Dict[str, Any]:
-        """Analyze competition using structured output with Pydantic."""
-        print(f"[DEBUG] Starting analysis with model: {model}, query: {query[:30]}...")
-        system_prompt = """You are a Competitive Analysis Agent specialized in market research and competitor analysis.
-        Your task is to provide structured insights about competitors and market trends based on the user's query.
-        Provide factual information and strategic recommendations.
-        
-        CRITICAL INSTRUCTION: You must NEVER return HTML in your response. Do not use any HTML tags, divs, spans, or any markup whatsoever.
-        
-        Format your response with plain text only, using these exact section headers:
-        - SUMMARY: Brief overview of the competitive landscape
-        - COMPETITORS: List each competitor with their strengths, weaknesses, and features
-        - MARKET TRENDS: Key trends affecting the market
-        - RECOMMENDATIONS: Strategic recommendations based on the analysis
-        
-        Example format (follow this EXACTLY):
-        SUMMARY:
-        Brief overview here.
-        
-        COMPETITORS:
-        Competitor 1:
-        - Strengths: strength1, strength2
-        - Weaknesses: weakness1, weakness2
-        - Features: feature1, feature2
-        
-        MARKET TRENDS:
-        Trend 1:
-        - Impact: description
-        
-        RECOMMENDATIONS:
-        - Recommendation 1
-        - Recommendation 2
-        
-        Remember: PLAIN TEXT ONLY, NO HTML TAGS WHATSOEVER. If you include any HTML tags, your response will be rejected.
-        """
-        
-        full_prompt = f"{system_prompt}\n\nUser Query: {query}\n\nProvide a detailed competitive analysis."
-        
-        # Call the appropriate model
-        print(f"[DEBUG] Calling {model} API...")
-        if model == "gemini":
-            raw_response = await self.call_gemini(full_prompt)
-            print(f"[DEBUG] Gemini API response received, length: {len(raw_response)}")
-        elif model == "lmstudio":
-            raw_response = await self.call_lmstudio(full_prompt)
-            print(f"[DEBUG] LMStudio API response received, length: {len(raw_response)}")
-        else:  # Default to ollama
-            raw_response = await self.call_ollama(full_prompt)
-            print(f"[DEBUG] Ollama API response received, length: {len(raw_response)}")
-        
-        # Check if the response indicates an HTML error from Gemini
-        if "Gemini response contained HTML" in raw_response:
-            return {
-                "error": "Gemini returned HTML instead of structured text. Please try again or use a different model.",
-                "raw": raw_response
+            "stream": False,
+            "format": "json", # Explicitly ask Ollama for JSON format
+            "options": { # Ollama specific generation parameters if needed
+                 "temperature": 0.5,
+                 "top_k": 40,
+                 "top_p": 0.95,
+                 # Ollama doesn't have maxOutputTokens here, depends on model limits/context size
             }
-        
-        # Parse the response into structured format using Pydantic
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info(f"Sending request to Ollama API ({self.ollama_model}). Prompt length: {len(prompt)}")
+                response = await client.post(url, json=data, timeout=180.0) # Longer timeout for local models
+                logger.info(f"Ollama API response status: {response.status_code}")
+
+                if response.status_code == 200:
+                    result = response.json()
+                    raw_response = result.get("response", "")
+                    logger.info(f"Ollama raw response received (first 200 chars): {raw_response[:200]}...")
+                    # Ollama with format=json should return just the JSON string
+                    # Basic cleanup: remove potential markdown fences just in case
+                    cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_response.strip(), flags=re.MULTILINE)
+                    return cleaned_text
+                else:
+                    logger.error(f"Ollama API Error: {response.status_code} - {response.text}")
+                    return json.dumps({"error": f"Ollama API Error: {response.status_code}", "details": response.text})
+            except httpx.ReadTimeout:
+                 logger.error("Ollama API request timed out.")
+                 return json.dumps({"error": "Ollama API request timed out"})
+            except Exception as e:
+                logger.error(f"Error calling Ollama API: {e}", exc_info=True)
+                return json.dumps({"error": f"Exception calling Ollama API: {str(e)}"})
+
+    async def call_lmstudio(self, prompt: str) -> str:
+        """Call LMStudio (OpenAI compatible) API, expecting JSON output based on prompt."""
+        if not self.lmstudio_model:
+             return json.dumps({"error": "LMStudio model not configured in .env (LMSTUDIO_MODEL)"})
+
+        url = f"{self.lmstudio_url}/chat/completions" # Use chat completions endpoint
+        data = {
+            "model": self.lmstudio_model, # Model name might be required depending on LMStudio setup
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT.split("User Query:")[0].strip()}, # Extract system part
+                {"role": "user", "content": prompt.split("User Query:")[-1].strip()} # Extract user query part
+            ],
+            "temperature": 0.5,
+            "max_tokens": 3072, # Adjust as needed
+             "response_format": {"type": "json_object"}, # Request JSON mode (OpenAI standard)
+            "stream": False
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info(f"Sending request to LMStudio API ({self.lmstudio_model}). Prompt length: {len(prompt)}")
+                response = await client.post(url, json=data, timeout=180.0) # Longer timeout
+                logger.info(f"LMStudio API response status: {response.status_code}")
+
+                if response.status_code == 200:
+                    result = response.json()
+                    if "choices" in result and result["choices"]:
+                        message = result["choices"][0].get("message", {})
+                        raw_response = message.get("content", "")
+                        logger.info(f"LMStudio raw response received (first 200 chars): {raw_response[:200]}...")
+                        # Basic cleanup: remove potential markdown fences
+                        cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_response.strip(), flags=re.MULTILINE)
+                        return cleaned_text
+                    else:
+                        logger.error(f"Unexpected LMStudio response structure: {result}")
+                        return json.dumps({"error": "Unexpected LMStudio response structure", "details": result})
+                else:
+                    logger.error(f"LMStudio API Error: {response.status_code} - {response.text}")
+                    return json.dumps({"error": f"LMStudio API Error: {response.status_code}", "details": response.text})
+            except httpx.ReadTimeout:
+                 logger.error("LMStudio API request timed out.")
+                 return json.dumps({"error": "LMStudio API request timed out"})
+            except Exception as e:
+                logger.error(f"Error calling LMStudio API: {e}", exc_info=True)
+                return json.dumps({"error": f"Exception calling LMStudio API: {str(e)}"})
+
+    async def analyze_competition(self, query: str, model: str = "ollama") -> Dict[str, Any]:
+        """Analyze competition by calling the selected LLM and parsing the expected JSON output."""
+        logger.info(f"Starting analysis with model: {model}, query: {query[:50]}...")
+        full_prompt = self._prepare_prompt(query)
+
+        raw_response = ""
         try:
-            # Create an agent to extract structured data
-            agent = Agent()
-            extraction_prompt = f"Based on the following analysis, extract structured information into the CompetitiveAnalysis format:\n{raw_response}"
-            
-            # Manual parsing as fallback
-            # This is a simplified approach - in production, you'd use more robust parsing
-            competitors = []
-            market_trends = []
-            recommendations = []
-            summary = "Competitive analysis summary"
-            
-            # Log the raw response for debugging
-            print(f"[DEBUG] Raw response from {model} (first 200 chars): {raw_response[:200]}...")
-            
-            # Extract basic information from raw response
-            lines = raw_response.split('\n')
-            current_section = None
-            competitor_data = {}
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # Check for section headers
-                lower_line = line.lower()
-                if "summary" in lower_line and len(line) < 30:
-                    current_section = "summary"
-                    continue
-                elif "competitor" in lower_line and len(line) < 30:
-                    current_section = "competitors"
-                    continue
-                elif "market trend" in lower_line and len(line) < 30:
-                    current_section = "trends"
-                    continue
-                elif "recommendation" in lower_line and len(line) < 30:
-                    current_section = "recommendations"
-                    continue
-                
-                # Process content based on current section
-                if current_section == "summary":
-                    if len(line) > 10 and ":" not in line:
-                        summary = line
-                
-                elif current_section == "competitors":
-                    # Check if this is a new competitor entry
-                    if ":" in line and len(line.split(":")[0]) < 30:
-                        # Save previous competitor if exists
-                        if competitor_data and "name" in competitor_data:
-                            competitors.append(competitor_data)
-                        
-                        # Start new competitor
-                        competitor_data = {
-                            "name": line.split(":")[0].strip(),
-                            "strengths": [],
-                            "weaknesses": [],
-                            "market_share": None,
-                            "key_features": [],
-                            "pricing": None
-                        }
-                    
-                    # Add details to current competitor
-                    elif competitor_data and "name" in competitor_data:
-                        if "strength" in lower_line:
-                            strength = line.split(":")[-1].strip() if ":" in line else line
-                            if strength and len(strength) > 3:
-                                competitor_data["strengths"].append(strength)
-                        elif "weakness" in lower_line:
-                            weakness = line.split(":")[-1].strip() if ":" in line else line
-                            if weakness and len(weakness) > 3:
-                                competitor_data["weaknesses"].append(weakness)
-                        elif "feature" in lower_line or "product" in lower_line:
-                            feature = line.split(":")[-1].strip() if ":" in line else line
-                            if feature and len(feature) > 3:
-                                competitor_data["key_features"].append(feature)
-                        elif "market share" in lower_line and ":" in line:
-                            competitor_data["market_share"] = line.split(":")[-1].strip()
-                        elif "pricing" in lower_line and ":" in line:
-                            competitor_data["pricing"] = line.split(":")[-1].strip()
-                
-                elif current_section == "trends":
-                    if len(line) > 10:
-                        trend_text = line
-                        impact = "Impact on market dynamics"
-                        
-                        # Look for impact in next lines
-                        trend_idx = lines.index(line)
-                        if trend_idx + 1 < len(lines) and "impact" in lines[trend_idx + 1].lower():
-                            impact = lines[trend_idx + 1].split(":")[-1].strip() if ":" in lines[trend_idx + 1] else lines[trend_idx + 1]
-                        
-                        market_trends.append({
-                            "trend": trend_text,
-                            "impact": impact,
-                            "opportunity": None,
-                            "threat": None
-                        })
-                
-                elif current_section == "recommendations":
-                    if len(line) > 10 and not line.startswith("-"):
-                        recommendations.append(line)
-            
-            # Add the last competitor if exists
-            if competitor_data and "name" in competitor_data:
-                competitors.append(competitor_data)
-            
-            # Ensure we have at least some data
-            if not competitors:
-                competitors = [{"name": "Competitor 1", "strengths": ["Strong market presence"], "weaknesses": ["Limited innovation"], "market_share": None, "key_features": ["Core product"], "pricing": None}]
-            if not market_trends:
-                market_trends = [{"trend": "Digital transformation", "impact": "Changing customer expectations", "opportunity": None, "threat": None}]
-            if not recommendations:
-                recommendations = ["Focus on product differentiation"]
-            
-            # Clean up empty lists
-            for comp in competitors:
-                if not comp["strengths"]:
-                    comp["strengths"] = ["Strength extracted from analysis"]
-                if not comp["weaknesses"]:
-                    comp["weaknesses"] = ["Weakness extracted from analysis"]
-                if not comp["key_features"]:
-                    comp["key_features"] = ["Feature extracted from analysis"]
-            
-            analysis = CompetitiveAnalysis(
-                competitors=competitors,
-                market_trends=market_trends,
-                recommendations=recommendations,
-                summary=summary
-            )
-            
+            if model == "gemini":
+                if not self.gemini_api_key: return {"error": "Gemini API key not configured"}
+                raw_response = await self.call_gemini(full_prompt)
+            elif model == "lmstudio":
+                 if not self.lmstudio_model: return {"error": "LMStudio model not configured"}
+                 raw_response = await self.call_lmstudio(full_prompt)
+            elif model == "ollama":
+                raw_response = await self.call_ollama(full_prompt)
+            else:
+                logger.error(f"Invalid model selected: {model}")
+                return {"error": f"Invalid model selected: {model}"}
+
+            logger.info(f"Raw response received from {model} (length: {len(raw_response)})")
+            # Attempt to parse the raw response as JSON directly into the Pydantic model
+            analysis = CompetitiveAnalysis.model_validate_json(raw_response)
+            logger.info(f"Successfully parsed response from {model} into CompetitiveAnalysis model.")
             return {
-                "structured": analysis.model_dump(),
-                "raw": raw_response
+                "structured": analysis.model_dump(mode='json'), # Return dict representation
+                "raw": raw_response # Still useful for debugging
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON response from {model}: {e}", exc_info=True)
+            logger.error(f"Raw response was: {raw_response[:1000]}...") # Log more of the failing response
+            # Try to extract potential error message if the response itself was a JSON error object
+            try:
+                error_json = json.loads(raw_response)
+                if "error" in error_json:
+                     return {"error": f"LLM returned an error: {error_json.get('error')} - {error_json.get('details', '')}", "raw": raw_response}
+            except Exception:
+                 pass # Ignore if it wasn't a JSON error object
+            return {"error": f"Failed to decode JSON response from {model}. Response was not valid JSON.", "raw": raw_response}
+
+        except ValidationError as e:
+            logger.error(f"Failed to validate JSON response from {model} against Pydantic schema: {e}", exc_info=True)
+            logger.error(f"Raw response was: {raw_response[:1000]}...")
+            return {
+                "error": f"Response from {model} did not match the expected structure (Pydantic Validation Error).",
+                "raw": raw_response,
+                "validation_errors": e.errors() # Include Pydantic validation errors
             }
         except Exception as e:
+            # Catch any other unexpected errors during processing
+            logger.error(f"An unexpected error occurred during analysis with {model}: {e}", exc_info=True)
             return {
-                "error": f"Failed to parse response: {str(e)}",
-                "raw": raw_response
+                "error": f"An unexpected error occurred: {str(e)}",
+                "raw": raw_response # Include raw response if available
             }

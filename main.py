@@ -3,7 +3,7 @@ from redis import Redis
 from auth import add_auth_routes
 from dashboard import add_dashboard_routes
 from analysis import add_analysis_routes
-from utils import get_user, SP
+from utils import get_user
 
 app, rt = fast_app(with_session=True)
 redis = Redis(host='localhost', port=6379, db=0)
