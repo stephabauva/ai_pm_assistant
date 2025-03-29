@@ -1,10 +1,8 @@
-# ---- File: ai_agent.py ----
-
 import os
 import httpx
 import json
-import re  # Keep re for potential minor cleanup if needed, but not for core parsing
-from typing import List, Optional, Dict, Any
+import re
+from typing import List, Optional, Dict, Any, Tuple
 from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 import logging
@@ -15,8 +13,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Pydantic Models for Structured Output ---
-
+# --- Pydantic Models --- (Keep these as they are)
 class CompetitorInfo(BaseModel):
     name: str = Field(..., description="Name of the competitor")
     strengths: List[str] = Field(..., description="Key strengths of the competitor")
@@ -38,7 +35,6 @@ class CompetitiveAnalysis(BaseModel):
     recommendations: List[str] = Field(..., description="Strategic recommendations based on the analysis")
     summary: str = Field(..., description="Executive summary of the competitive landscape")
 
-    # Add an example for the LLM prompt
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -72,202 +68,208 @@ class CompetitiveAnalysis(BaseModel):
         }
     }
 
+# --- Centralized Prompt Components ---
 
-# --- Centralized System Prompt ---
-
-# Note: We ask for JSON output directly matching the Pydantic schema.
-# Create the system prompt with proper escaping for JSON schema
+# Prepare schema and example JSON strings once
 schema_json = json.dumps(CompetitiveAnalysis.model_json_schema(), indent=2)
 example_json = json.dumps(CompetitiveAnalysis.model_config['json_schema_extra']['examples'][0], indent=2)
 
-SYSTEM_PROMPT = """You are a Competitive Analysis Agent specialized in market research and competitor analysis.
+CORE_SYSTEM_INSTRUCTION = """You are a Competitive Analysis Agent specialized in market research and competitor analysis.
 Your task is to analyze the user's query and provide structured insights about competitors and market trends.
 Provide factual information and strategic recommendations.
 
-CRITICAL INSTRUCTION: You MUST respond ONLY with a valid JSON object that strictly adheres to the following Pydantic schema. Do NOT include any introductory text, explanations, apologies, or markdown formatting (like ```json ... ```) around the JSON object. Your entire response must be the JSON object itself.
+CRITICAL INSTRUCTION: You MUST respond ONLY with a valid JSON object that strictly adheres to the provided Pydantic schema. Do NOT include any introductory text, explanations, apologies, or markdown formatting (like ```json ... ```) around the JSON object. Your entire response must be the JSON object itself."""
 
-Pydantic Schema:
+SCHEMA_GUIDANCE = f"""The user requires the response formatted according to this Pydantic Schema:
 ```json
-{0}
-```
+{schema_json}
+content_copy
+download
+Use code with caution.
+Python
+Here is an example of the exact JSON format required:
 
-Example of the expected JSON format (use this structure):
-```json
-{1}
-```
+{example_json}
+content_copy
+download
+Use code with caution.
+Json
+Analyze the user query below and return ONLY the valid JSON object matching the schema.
+User Query: {{user_query}}"""
 
-Analyze the user query below and return the JSON object.
+FULL_USER_PROMPT_TEMPLATE = SCHEMA_GUIDANCE # Keep this structure for the user message content
 
-User Query: {{user_query}}
-"""
-
-# Format the prompt template with the JSON schema and example
-SYSTEM_PROMPT = SYSTEM_PROMPT.format(schema_json, example_json)
-
+def clean_json_response(text: str) -> str:
+    """Removes optional json markdown fences and strips whitespace."""
+    return re.sub(r'^(?:json)?\s*|\s*```$', '', text.strip(), flags=re.MULTILINE | re.IGNORECASE)
 
 class AIClient:
-    """Client for making AI API calls, expecting structured JSON output."""
+    """Client for making AI API calls using chat-oriented endpoints for better token efficiency."""
 
     def __init__(self):
+        # Load configuration from environment variables
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        self.lmstudio_url = os.getenv("LMSTUDIO_URL", "http://localhost:1234/v1") # Ensure /v1
-        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3") # Default model
-        self.lmstudio_model = os.getenv("LMSTUDIO_MODEL") # No default, needs to be set in .env
-        self.gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-1.5-flash-latest") # Use latest flash
+        self.lmstudio_url = os.getenv("LMSTUDIO_URL", "http://localhost:1234/v1")
+        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
+        self.lmstudio_model = os.getenv("LMSTUDIO_MODEL")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-1.5-flash-latest")
 
+        # Log warnings for missing configurations
         if not self.gemini_api_key:
-            logger.warning("Gemini API key not found in environment variables. Gemini functionality will be disabled.")
+            logger.warning("GEMINI_API_KEY not found. Gemini functionality disabled.")
         if not self.lmstudio_model:
-             logger.warning("LMSTUDIO_MODEL not set in environment variables. LMStudio functionality may be limited.")
+            logger.warning("LMSTUDIO_MODEL not set. LMStudio functionality may be limited or fail.")
+        # Basic check for Ollama URL reachability (optional, synchronous check)
+        # try:
+        #     httpx.get(f"{self.ollama_url}/api/tags")
+        # except httpx.RequestError:
+        #     logger.warning(f"Ollama URL {self.ollama_url} seems unreachable.")
 
-    def _prepare_prompt(self, query: str) -> str:
-        """Formats the prompt with the user query."""
-        # The SYSTEM_PROMPT is already pre-formatted with schema and example
-        # Just need to replace the user_query placeholder
-        return SYSTEM_PROMPT.replace("{{user_query}}", query)
-
-    async def call_gemini(self, prompt: str) -> str:
-        """Call Gemini API, requesting JSON output."""
+    async def call_gemini(self, system_instruction: str, user_prompt: str) -> str:
+        """Call Gemini API using system instructions and user content."""
         if not self.gemini_api_key:
-            logger.error("Gemini API key is not configured.")
-            return json.dumps({"error": "Gemini API key not configured"}) # Return JSON error
+            return json.dumps({"error": "Gemini API key not configured"})
 
-        # Ensure the model name starts with "models/" if it doesn't already
         model_name = self.gemini_model
         if not model_name.startswith("models/"):
             model_name = f"models/{model_name}"
-
         url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent"
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": self.gemini_api_key
-        }
-        # Request JSON output explicitly
+
+        headers = {"Content-Type": "application/json", "x-goog-api-key": self.gemini_api_key}
         data = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            # Use system_instruction field (available in v1beta)
+            "system_instruction": {"parts": [{"text": system_instruction}]},
+            "contents": [
+                # The user prompt contains schema, example, and the actual query
+                {"role": "user", "parts": [{"text": user_prompt}]}
+                # Add {"role": "model", "parts": [{"text": "..."}]} if needed for multi-turn
+            ],
             "generationConfig": {
-                "temperature": 0.5, # Slightly lower temp might help with structured output
+                "temperature": 0.4, # Slightly lower temp for stricter JSON adherence
                 "topK": 40,
                 "topP": 0.95,
-                "maxOutputTokens": 3072, # Increased max tokens for potentially larger JSON
-                "response_mime_type": "application/json", # CRITICAL: Ask Gemini for JSON
+                "maxOutputTokens": 3500, # Allow ample space for JSON
+                "response_mime_type": "application/json", # Request JSON
             }
         }
 
         async with httpx.AsyncClient() as client:
             try:
-                logger.info(f"Sending request to Gemini API ({self.gemini_model}) Prompt length: {len(prompt)}")
-                response = await client.post(url, headers=headers, json=data, timeout=120.0) # Increased timeout
+                logger.info(f"Sending request to Gemini API ({model_name})")
+                # logger.debug(f"Gemini Request Data: {json.dumps(data, indent=2)}") # DEBUG
+                response = await client.post(url, headers=headers, json=data, timeout=120.0)
                 logger.info(f"Gemini API response status: {response.status_code}")
 
                 if response.status_code == 200:
-                    # Gemini should return JSON directly because of response_mime_type
-                    # Sometimes it might still wrap it, attempt to extract if necessary
                     try:
                         result = response.json()
-                        # Standard Gemini structure check
+                        # logger.debug(f"Gemini Raw Response: {json.dumps(result, indent=2)}") # DEBUG
                         if "candidates" in result and result["candidates"] and "content" in result["candidates"][0] and "parts" in result["candidates"][0]["content"]:
                             raw_text = result["candidates"][0]["content"]["parts"][0]["text"]
-                            # The raw_text *should* be the JSON string
                             logger.info(f"Gemini raw response text received (first 200 chars): {raw_text[:200]}...")
-                            # Basic cleanup: remove potential markdown fences
-                            cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_text.strip(), flags=re.MULTILINE)
-                            return cleaned_text
+                            return clean_json_response(raw_text) # Clean potential fences
                         else:
-                            logger.error(f"Unexpected Gemini API response structure: {result}")
-                            return json.dumps({"error": "Unexpected Gemini API response structure", "details": result})
+                            # Handle potential safety blocks or other non-standard responses
+                            error_detail = result.get("promptFeedback", "No candidates found in response.")
+                            logger.error(f"Unexpected Gemini API response structure or blocked content: {error_detail}")
+                            return json.dumps({"error": "Unexpected Gemini API response structure or blocked content", "details": error_detail})
                     except json.JSONDecodeError:
-                         # If the outer response isn't JSON (unexpected)
-                         logger.error(f"Gemini response was not valid JSON. Status: {response.status_code}, Response: {response.text[:500]}")
-                         return json.dumps({"error": "Gemini response body was not valid JSON", "details": response.text[:500]})
+                        logger.error(f"Gemini response body was not valid JSON. Status: {response.status_code}, Response: {response.text[:500]}")
+                        return json.dumps({"error": "Gemini response body was not valid JSON", "details": response.text[:500]})
                     except Exception as e:
-                         logger.error(f"Error processing Gemini response JSON: {e}", exc_info=True)
-                         return json.dumps({"error": f"Error processing Gemini response: {str(e)}", "details": response.text[:500]})
-
+                        logger.error(f"Error processing Gemini response JSON: {e}", exc_info=True)
+                        return json.dumps({"error": f"Error processing Gemini response: {str(e)}", "details": response.text[:500]})
                 else:
                     logger.error(f"Gemini API Error: {response.status_code} - {response.text}")
                     return json.dumps({"error": f"Gemini API Error: {response.status_code}", "details": response.text})
             except httpx.ReadTimeout:
-                 logger.error("Gemini API request timed out.")
-                 return json.dumps({"error": "Gemini API request timed out"})
+                logger.error("Gemini API request timed out.")
+                return json.dumps({"error": "Gemini API request timed out"})
             except Exception as e:
                 logger.error(f"Error calling Gemini API: {e}", exc_info=True)
                 return json.dumps({"error": f"Exception calling Gemini API: {str(e)}"})
 
-    async def call_ollama(self, prompt: str) -> str:
-        """Call Ollama API, expecting JSON output based on prompt."""
-        url = f"{self.ollama_url}/api/generate"
+    async def call_ollama(self, system_instruction: str, user_prompt: str) -> str:
+        """Call Ollama API using the /api/chat endpoint."""
+        url = f"{self.ollama_url}/api/chat" # Use chat endpoint
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ]
         data = {
             "model": self.ollama_model,
-            "prompt": prompt,
+            "messages": messages,
             "stream": False,
-            "format": "json", # Explicitly ask Ollama for JSON format
-            "options": { # Ollama specific generation parameters if needed
-                 "temperature": 0.5,
+            "format": "json", # Request JSON output
+            "options": {
+                 "temperature": 0.4,
                  "top_k": 40,
                  "top_p": 0.95,
-                 # Ollama doesn't have maxOutputTokens here, depends on model limits/context size
             }
         }
 
         async with httpx.AsyncClient() as client:
             try:
-                logger.info(f"Sending request to Ollama API ({self.ollama_model}). Prompt length: {len(prompt)}")
-                response = await client.post(url, json=data, timeout=180.0) # Longer timeout for local models
+                logger.info(f"Sending request to Ollama Chat API ({self.ollama_model})")
+                # logger.debug(f"Ollama Request Data: {json.dumps(data, indent=2)}") # DEBUG
+                response = await client.post(url, json=data, timeout=180.0)
                 logger.info(f"Ollama API response status: {response.status_code}")
 
                 if response.status_code == 200:
                     result = response.json()
-                    raw_response = result.get("response", "")
-                    logger.info(f"Ollama raw response received (first 200 chars): {raw_response[:200]}...")
-                    # Ollama with format=json should return just the JSON string
-                    # Basic cleanup: remove potential markdown fences just in case
-                    cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_response.strip(), flags=re.MULTILINE)
-                    return cleaned_text
+                    # logger.debug(f"Ollama Raw Response: {json.dumps(result, indent=2)}") # DEBUG
+                    if "message" in result and "content" in result["message"]:
+                         raw_response = result["message"]["content"]
+                         logger.info(f"Ollama raw response received (first 200 chars): {raw_response[:200]}...")
+                         return clean_json_response(raw_response) # Clean potential fences
+                    else:
+                         logger.error(f"Unexpected Ollama chat response structure: {result}")
+                         return json.dumps({"error": "Unexpected Ollama chat response structure", "details": result})
                 else:
                     logger.error(f"Ollama API Error: {response.status_code} - {response.text}")
                     return json.dumps({"error": f"Ollama API Error: {response.status_code}", "details": response.text})
             except httpx.ReadTimeout:
-                 logger.error("Ollama API request timed out.")
-                 return json.dumps({"error": "Ollama API request timed out"})
+                logger.error("Ollama API request timed out.")
+                return json.dumps({"error": "Ollama API request timed out"})
             except Exception as e:
                 logger.error(f"Error calling Ollama API: {e}", exc_info=True)
                 return json.dumps({"error": f"Exception calling Ollama API: {str(e)}"})
 
-    async def call_lmstudio(self, prompt: str) -> str:
-        """Call LMStudio (OpenAI compatible) API, expecting JSON output based on prompt."""
+    async def call_lmstudio(self, system_instruction: str, user_prompt: str) -> str:
+        """Call LMStudio (OpenAI compatible) API using chat completions."""
         if not self.lmstudio_model:
              return json.dumps({"error": "LMStudio model not configured in .env (LMSTUDIO_MODEL)"})
 
-        url = f"{self.lmstudio_url}/chat/completions" # Use chat completions endpoint
+        url = f"{self.lmstudio_url}/chat/completions"
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ]
         data = {
-            "model": self.lmstudio_model, # Model name might be required depending on LMStudio setup
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT.split("User Query:")[0].strip()}, # Extract system part
-                {"role": "user", "content": prompt.split("User Query:")[-1].strip()} # Extract user query part
-            ],
-            "temperature": 0.5,
-            "max_tokens": 3072, # Adjust as needed
-             "response_format": {"type": "json_object"}, # Request JSON mode (OpenAI standard)
+            "model": self.lmstudio_model,
+            "messages": messages,
+            "temperature": 0.4,
+            "max_tokens": 3500,
+            "response_format": {"type": "json_object"}, # Request JSON mode
             "stream": False
         }
 
         async with httpx.AsyncClient() as client:
             try:
-                logger.info(f"Sending request to LMStudio API ({self.lmstudio_model}). Prompt length: {len(prompt)}")
-                response = await client.post(url, json=data, timeout=180.0) # Longer timeout
+                logger.info(f"Sending request to LMStudio API ({self.lmstudio_model})")
+                # logger.debug(f"LMStudio Request Data: {json.dumps(data, indent=2)}") # DEBUG
+                response = await client.post(url, json=data, timeout=180.0)
                 logger.info(f"LMStudio API response status: {response.status_code}")
 
                 if response.status_code == 200:
                     result = response.json()
+                    # logger.debug(f"LMStudio Raw Response: {json.dumps(result, indent=2)}") # DEBUG
                     if "choices" in result and result["choices"]:
                         message = result["choices"][0].get("message", {})
                         raw_response = message.get("content", "")
                         logger.info(f"LMStudio raw response received (first 200 chars): {raw_response[:200]}...")
-                        # Basic cleanup: remove potential markdown fences
-                        cleaned_text = re.sub(r'^```json\s*|\s*```$', '', raw_response.strip(), flags=re.MULTILINE)
-                        return cleaned_text
+                        return clean_json_response(raw_response) # Clean potential fences
                     else:
                         logger.error(f"Unexpected LMStudio response structure: {result}")
                         return json.dumps({"error": "Unexpected LMStudio response structure", "details": result})
@@ -275,64 +277,66 @@ class AIClient:
                     logger.error(f"LMStudio API Error: {response.status_code} - {response.text}")
                     return json.dumps({"error": f"LMStudio API Error: {response.status_code}", "details": response.text})
             except httpx.ReadTimeout:
-                 logger.error("LMStudio API request timed out.")
-                 return json.dumps({"error": "LMStudio API request timed out"})
+                logger.error("LMStudio API request timed out.")
+                return json.dumps({"error": "LMStudio API request timed out"})
             except Exception as e:
                 logger.error(f"Error calling LMStudio API: {e}", exc_info=True)
                 return json.dumps({"error": f"Exception calling LMStudio API: {str(e)}"})
 
     async def analyze_competition(self, query: str, model: str = "ollama") -> Dict[str, Any]:
-        """Analyze competition by calling the selected LLM and parsing the expected JSON output."""
+        """Analyze competition by structuring messages for chat APIs and parsing JSON output."""
         logger.info(f"Starting analysis with model: {model}, query: {query[:50]}...")
-        full_prompt = self._prepare_prompt(query)
+
+        # Prepare the user prompt content including the schema guidance and the actual query
+        user_prompt_content = FULL_USER_PROMPT_TEMPLATE.replace("{{user_query}}", query)
 
         raw_response = ""
         try:
+            # Call the appropriate model using system instruction and the combined user prompt
             if model == "gemini":
                 if not self.gemini_api_key: return {"error": "Gemini API key not configured"}
-                raw_response = await self.call_gemini(full_prompt)
+                raw_response = await self.call_gemini(CORE_SYSTEM_INSTRUCTION, user_prompt_content)
             elif model == "lmstudio":
-                 if not self.lmstudio_model: return {"error": "LMStudio model not configured"}
-                 raw_response = await self.call_lmstudio(full_prompt)
+                if not self.lmstudio_model: return {"error": "LMStudio model not configured"}
+                raw_response = await self.call_lmstudio(CORE_SYSTEM_INSTRUCTION, user_prompt_content)
             elif model == "ollama":
-                raw_response = await self.call_ollama(full_prompt)
+                raw_response = await self.call_ollama(CORE_SYSTEM_INSTRUCTION, user_prompt_content)
             else:
                 logger.error(f"Invalid model selected: {model}")
                 return {"error": f"Invalid model selected: {model}"}
 
             logger.info(f"Raw response received from {model} (length: {len(raw_response)})")
-            # Attempt to parse the raw response as JSON directly into the Pydantic model
+
+            # --- Attempt to parse the raw response as JSON directly into the Pydantic model ---
             analysis = CompetitiveAnalysis.model_validate_json(raw_response)
             logger.info(f"Successfully parsed response from {model} into CompetitiveAnalysis model.")
             return {
-                "structured": analysis.model_dump(mode='json'), # Return dict representation
-                "raw": raw_response # Still useful for debugging
+                "structured": analysis.model_dump(mode='json'),
+                "raw": raw_response
             }
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode JSON response from {model}: {e}", exc_info=True)
-            logger.error(f"Raw response was: {raw_response[:1000]}...") # Log more of the failing response
-            # Try to extract potential error message if the response itself was a JSON error object
+            logger.error(f"Raw response was: {raw_response[:1000]}...")
             try:
                 error_json = json.loads(raw_response)
                 if "error" in error_json:
-                     return {"error": f"LLM returned an error: {error_json.get('error')} - {error_json.get('details', '')}", "raw": raw_response}
+                    return {"error": f"LLM returned an error object: {error_json.get('error')} - {error_json.get('details', '')}", "raw": raw_response}
             except Exception:
-                 pass # Ignore if it wasn't a JSON error object
+                pass # Ignore if it wasn't a JSON error object
             return {"error": f"Failed to decode JSON response from {model}. Response was not valid JSON.", "raw": raw_response}
 
         except ValidationError as e:
             logger.error(f"Failed to validate JSON response from {model} against Pydantic schema: {e}", exc_info=True)
             logger.error(f"Raw response was: {raw_response[:1000]}...")
             return {
-                "error": f"Response from {model} did not match the expected structure (Pydantic Validation Error).",
+                "error": f"Response JSON from {model} did not match the expected structure.",
                 "raw": raw_response,
-                "validation_errors": e.errors() # Include Pydantic validation errors
+                "validation_errors": e.errors()
             }
         except Exception as e:
-            # Catch any other unexpected errors during processing
             logger.error(f"An unexpected error occurred during analysis with {model}: {e}", exc_info=True)
             return {
                 "error": f"An unexpected error occurred: {str(e)}",
-                "raw": raw_response # Include raw response if available
+                "raw": raw_response
             }

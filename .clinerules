@@ -1,5 +1,5 @@
 
-First, look at @code_summary.md to understand the codebase, if changes are made, update this file if necessary.
+First, look at @code_summary.md to understand the codebase. At the end of the conversation, if changes are made, update this file if necessary.
 
 <!-- Rules:
 - Process queries using minimal tokens.

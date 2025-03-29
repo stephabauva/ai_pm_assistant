@@ -9,8 +9,7 @@ import logging # Add logging
 
 logger = logging.getLogger(__name__)
 
-# Create AI client instance
-ai_client = AIClient()
+# Removed module-level AI client instance
 
 async def llm(q, model):
     """Process query using the selected model, expecting structured JSON."""
@@ -49,6 +48,9 @@ async def llm(q, model):
     if model not in ["gemini", "ollama", "lmstudio"]:
         logger.warning(f"Invalid model selected: {model}")
         return {"error": "Invalid model selected"} # Return error structure
+
+    # Instantiate AIClient inside the function
+    ai_client = AIClient()
 
     try:
         # Use the AI client to get structured analysis (expects JSON)
