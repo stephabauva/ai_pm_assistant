@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # --- AI Model Selection ---
     # Provide defaults, but allow override via .env
-    ollama_model: str = Field("llama3", description="Default model name for Ollama")
+    ollama_model: str = Field("phi4", description="Default model name for Ollama")
     lmstudio_model: Optional[str] = Field(None, description="Model identifier for LMStudio (required if using LMStudio)")
     gemini_model: str = Field("models/gemini-1.5-flash-latest", description="Model identifier for Gemini")
 

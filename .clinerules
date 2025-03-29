@@ -1,6 +1,12 @@
 
 First, look at @code_summary.md to understand the codebase. At the end of the conversation, if changes are made, update this file if necessary.
 
+delete this : ```json if you see it anywhere in the code
+delete these artifacts in code blocks if you see them: "IGNORE_WHEN_COPYING_START
+content_copy download 
+Use code with caution.Python
+IGNORE_WHEN_COPYING_END" 
+
 <!-- Rules:
 - Process queries using minimal tokens.
 - Prioritize compact responses (avoid verbosity).
