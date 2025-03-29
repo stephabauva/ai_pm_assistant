@@ -4,80 +4,18 @@ from fasthtml.common import *
 from starlette.requests import Request
 from fastapi import Depends, Form
 import json
-from ai_agent import AIClient # Assuming AIClient is importable
-import logging # Add logging
+import logging
+
+# Import the specific agent function
+from agents.market_research_agent import analyze_competition as analyze_market_competition # Alias for clarity
+
+# Import utilities if needed (e.g., get_user)
+from utils import get_user
 
 logger = logging.getLogger(__name__)
 
-# Removed module-level AI client instance
+# Removed the old llm function and AIClient instantiation here
 
-async def llm(q, model):
-    """Process query using the selected model, expecting structured JSON."""
-    logger.info(f"LLM function called with query: '{q[:50]}...' and model: {model}")
-    # Special test query to bypass API calls for debugging
-    if q.lower().startswith("test:"):
-        logger.info("Test query detected, returning static test response")
-        # Return a structure similar to what CompetitiveAnalysis.model_dump() would produce
-        return {
-            "structured": {
-                "summary": "This is a test response to verify the UI rendering.",
-                "competitors": [
-                    {
-                        "name": "Test Competitor",
-                        "strengths": ["Fast response time", "No API call needed"],
-                        "weaknesses": ["Not real data"],
-                        "market_share": "N/A",
-                        "key_features": ["Testing functionality"],
-                        "pricing": "Free"
-                    }
-                ],
-                "market_trends": [
-                    {
-                        "trend": "Test Trend",
-                        "impact": "Helps debug the application",
-                        "opportunity": "Faster debugging",
-                        "threat": None
-                    }
-                ],
-                "recommendations": ["Use real queries for actual analysis"]
-            },
-            "raw": "Static test response"
-        }
-
-
-    if model not in ["gemini", "ollama", "lmstudio"]:
-        logger.warning(f"Invalid model selected: {model}")
-        return {"error": "Invalid model selected"} # Return error structure
-
-    # Instantiate AIClient inside the function
-    ai_client = AIClient()
-
-    try:
-        # Use the AI client to get structured analysis (expects JSON)
-        result = await ai_client.analyze_competition(q, model)
-        logger.info(f"Result from ai_client.analyze_competition: keys={result.keys()}")
-
-        # Check if the analysis itself returned an error
-        if "error" in result:
-            logger.error(f"Error received from analyze_competition: {result['error']}")
-            # Format the error nicely for the frontend
-            error_message = f"Error processing request: {result['error']}\n"
-            if "raw" in result and result["raw"]:
-                 error_message += f"\nRaw response from {model} (if available):\n{result['raw'][:500]}..." # Show snippet of raw response
-            if "validation_errors" in result:
-                 error_message += f"\nValidation Details: {json.dumps(result['validation_errors'], indent=2)}"
-
-            # Return the error in a way the frontend can display
-            # We'll wrap it slightly differently so the calling route knows it's an error display request
-            return {"display_error": error_message}
-
-        # If successful, return the structured data and raw response
-        return result # Contains {"structured": {...}, "raw": "..."}
-
-    except Exception as e:
-        logger.exception(f"Unexpected error in llm function for model {model}: {e}")
-        # Return error structure
-        return {"display_error": f"An unexpected error occurred in the application: {str(e)}"}
 
 # --- Routes ---
 
@@ -88,58 +26,86 @@ def add_analysis_routes(rt, get_user):
         r.session['selected_llm'] = model
         logger.info(f"Analyze POST request received: model={model}, query='{q[:50]}...' by user {email}")
 
-        # Always return the loading state immediately via HTMX
-        # The actual result will be fetched by '/analyze-result' triggered by the script
+        # Validate model choice before proceeding (optional but good practice)
+        valid_models = ["gemini", "ollama", "lmstudio"]
+        if model not in valid_models:
+             # Handle invalid model selection gracefully - maybe return an error directly
+             logger.warning(f"Invalid model '{model}' selected in form.")
+             # This part needs careful handling with HTMX response structure
+             # For now, we let the agent handle it, but could return an error UI here.
+             pass # Allow agent to handle for now
+
+
+        # Return the loading state immediately via HTMX
         loading_html = Div(
-            H3("Analysis in Progress...", cls="text-xl font-bold mb-3 text-blue-600"), # Changed color
+            H3("Analysis in Progress...", cls="text-xl font-bold mb-3 text-blue-600"),
             Div(
-                Div(cls="animate-pulse h-2 bg-blue-200 rounded w-full mb-4"), # Changed color
+                Div(cls="animate-pulse h-2 bg-blue-200 rounded w-full mb-4"),
                 Div(
-                    # Removed detailed steps for simplicity, just show pulsing bar and message
                     P(f"Contacting {model} model and processing your query...", cls="text-gray-700 font-medium mb-3"),
-                    P("Please wait, this may take 10-60 seconds depending on the model and query complexity.",
-                      cls="text-sm text-gray-500 mt-4"),
-                    cls="p-4 bg-white rounded-lg border border-blue-200" # Changed color
+                    P("Please wait, this may take 10-60 seconds...", cls="text-sm text-gray-500 mt-4"),
+                    cls="p-4 bg-white rounded-lg border border-blue-200"
                 ),
-                # Script to trigger the actual analysis result fetch
+                # Script to trigger the actual analysis result fetch via POST
                 Script(f"""
-                console.log("Triggering result fetch for model={model} q={q.replace('"', '"')}");
+                console.log("Triggering result fetch for model={model} q={q.replace('"', '"')}..."); // Use " for HTML attribute
                 setTimeout(function() {{
                     htmx.ajax('POST', '/analyze-result', {{
                         target:'#resp',
-                        values: {{ q: '{q.replace("'", "\\'")}', model: '{model}' }} // Pass data as values
+                        values: {{ q: '{q.replace("'", "\\'")}', model: '{model}' }}
                     }});
-                }}, 500); // Small delay before fetching results
+                }}, 500);
                 """),
-                id="resp", # Target for HTMX result swap
+                id="resp",
                 cls="p-4 bg-white rounded-lg shadow-md"
             )
         )
         return loading_html
 
-    @rt('/analyze-result', methods=['POST']) # Changed to POST to easily send query/model
+    @rt('/analyze-result', methods=['POST'])
     async def analyze_result(r: Request, q: str = Form(), model: str = Form(), email: str = Depends(get_user)):
-        logger.info(f"Analyze-Result POST request received: model={model}, query='{q[:50]}...' by user {email}")
+        logger.info(f"Analyze-Result POST received: model={model}, query='{q[:50]}...' by user {email}")
 
-        # Process the actual query using the refactored llm function
-        result_data = await llm(q, model)
-        logger.info(f"LLM result processing complete for model {model}")
+        # --- Call the specific agent ---
+        # Handle "test:" prefix here before calling the agent
+        if q.lower().startswith("test:"):
+            logger.info("Test query detected in analyze_result, returning static response")
+            result_data = {
+                 "structured": {"summary": "Static test response.", "competitors": [], "market_trends": [], "recommendations": ["Use real queries."]},
+                 "raw": "Test Query Processed"
+            }
+        else:
+            try:
+                # Call the market research agent function directly
+                result_data = await analyze_market_competition(query=q, model=model)
+                logger.info(f"Agent result processing complete for model {model}. Keys: {result_data.keys()}")
+            except Exception as e:
+                 # Catch unexpected errors during agent execution
+                 logger.exception(f"Unexpected error calling agent for model {model}: {e}")
+                 result_data = {"error": f"An unexpected error occurred in the application: {str(e)}"}
 
-        # Check if the llm function returned an error to display
-        if "display_error" in result_data:
-            logger.warning(f"Displaying error to user: {result_data['display_error'][:100]}...")
-            return Div(
+        # --- Format response based on agent result ---
+        display_content: Html = None
+        if "error" in result_data:
+            error_message = f"Error processing request: {result_data['error']}\n"
+            # Add details/raw snippet if available
+            if "details" in result_data and result_data["details"]:
+                 error_message += f"\nDetails: {json.dumps(result_data['details'], indent=2)}" # Assuming details are JSON serializable
+            elif "raw" in result_data and result_data["raw"]:
+                 error_message += f"\nRaw response snippet:\n{result_data['raw'][:500]}..."
+            if "validation_errors" in result_data:
+                 error_message += f"\nValidation Details: {json.dumps(result_data['validation_errors'], indent=2)}"
+
+            logger.warning(f"Displaying error to user: {error_message[:150]}...")
+            display_content = Div(
                 H3("Analysis Error", cls="text-xl font-bold mb-3 text-red-600"),
-                Pre(result_data["display_error"], cls="whitespace-pre-wrap bg-red-50 p-4 rounded-lg border border-red-200 text-sm text-red-800"),
-                # Include OOB swap for radio buttons even on error, so selection persists
-                render_model_selection_oob(model),
-                 id="resp", # Ensure the target div ID is included
+                Pre(error_message, cls="whitespace-pre-wrap bg-red-50 p-4 rounded-lg border border-red-200 text-sm text-red-800"),
+                id="resp", # Ensure the target div ID is included for replacement
                 cls="p-4 bg-white rounded-lg shadow-md"
             )
-
-        # --- Format successful structured response ---
-        analysis = result_data.get("structured", {}) # Default to empty dict if missing
-        formatted_response = f"""SUMMARY:
+        elif "structured" in result_data:
+            analysis = result_data["structured"]
+            formatted_response = f"""SUMMARY:
 {analysis.get('summary', 'Summary not available')}
 
 COMPETITORS:
@@ -161,21 +127,34 @@ MARKET TRENDS:
 ''' for trend in analysis.get('market_trends', [])])}
 
 RECOMMENDATIONS:
-{"".join([f'- {r}\n' for r in analysis.get('recommendations', ['No specific recommendations provided'])])}
-"""
-        # --- Return the results content and OOB updates for radio buttons ---
-        return Group( # Use Group to return multiple top-level elements for HTMX
-            # 1. Main results content for the #resp div
-            Div(
+{"".join([f'- {r}' for r in analysis.get('recommendations', ['No specific recommendations provided'])])}
+""" # Removed extra newline in recommendations join
+            display_content = Div(
                 H3("Analysis Results", cls="text-xl font-bold mb-3"),
                 Pre(formatted_response, cls="whitespace-pre-wrap bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm"),
-                 id="resp", # Target ID
+                id="resp", # Target ID for replacement
                 cls="p-4 bg-white rounded-lg shadow-md"
-            ),
-            # 2. OOB swap to update the radio buttons state
-            render_model_selection_oob(model)
+            )
+        else:
+             # Should not happen if agent returns correctly, but handle defensively
+             logger.error("Agent returned unexpected data structure.")
+             display_content = Div(
+                 H3("Application Error", cls="text-xl font-bold mb-3 text-red-600"),
+                 P("An unexpected error occurred processing the response."),
+                 id="resp",
+                 cls="p-4 bg-white rounded-lg shadow-md"
+             )
+
+
+        # --- Return the results content and OOB updates for radio buttons ---
+        # Use Group to return multiple top-level elements for HTMX
+        return Group(
+            display_content, # The main content for #resp
+            render_model_selection_oob(model) # OOB swap for radio buttons
         )
 
+
+# Helper function remains the same
 def render_model_selection_oob(selected_model: str):
      """Helper function to render model selection radio buttons with OOB swap attributes."""
      models = [("ollama", "Ollama (Local)"), ("lmstudio", "LMStudio (Local)"), ("gemini", "Gemini (Cloud)")]
@@ -186,13 +165,11 @@ def render_model_selection_oob(selected_model: str):
              Div(
                  Label(
                      Input(type="radio", name="model", value=value, checked=is_checked, cls="mr-2"),
-                     Span(label, cls="text-gray-700") # Wrap label text in Span
+                     Span(label, cls="text-gray-700")
                  ),
-                 # Critical: Add hx_swap_oob="true" and unique ID for each radio button group
                  id=f"model-radio-{value}",
                  hx_swap_oob="true",
-                 cls="mb-2" # Keep existing class if needed
+                 cls="mb-2"
              )
          )
-     # Return a Group of Divs
      return Group(*buttons)
