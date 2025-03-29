@@ -11,3 +11,7 @@ pytest-mock
 pydantic 
 pydantic-settings
 aiohttp
+
+#Optional
+ollama
+lmstudio

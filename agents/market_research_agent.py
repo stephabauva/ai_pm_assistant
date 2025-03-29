@@ -71,7 +71,7 @@ async def analyze_competition(query: str, model: str) -> Dict[str, Any]:
         if model == "gemini":
             raw_response = await ai_client.call_gemini(system_instruction, user_prompt_content)
         elif model == "lmstudio":
-             raw_response = await ai_client.call_lmstudio(system_instruction, user_prompt_content)
+             raw_response = await ai_client.call_lmstudio(system_instruction, user_prompt_content, json_schema=CompetitiveAnalysis.model_json_schema())
         elif model == "ollama":
             raw_response = await ai_client.call_ollama(system_instruction, user_prompt_content)
         else:

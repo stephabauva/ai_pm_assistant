@@ -152,16 +152,18 @@ class AIClient:
             logger.exception(f"{provider}: Unexpected error during API call: {e}")
             return create_error_json(f"{provider}: Unexpected error", str(e))
 
-    async def call_lmstudio(self, system_instruction: str, user_prompt: str) -> str:
+    async def call_lmstudio(self, system_instruction: str, user_prompt: str, json_schema: Optional[dict] = None) -> str:
         """Calls LMStudio API. Returns raw response string or error JSON string."""
         provider = "LMStudio"
         if not self.lmstudio_model:
-             logger.error(f"{provider}: Model name not configured.")
-             return create_error_json(f"{provider} model not configured")
+            logger.error(f"{provider}: Model name not configured.")
+            return create_error_json(f"{provider} model not configured")
 
         url = f"{self.lmstudio_url}/chat/completions"
         messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": user_prompt}]
-        data = {"model": self.lmstudio_model, "messages": messages, "temperature": 0.4, "max_tokens": 3500, "response_format": {"type": "json_object"}, "stream": False}
+        data = {"model": self.lmstudio_model, "messages": messages, "temperature": 0.4, "max_tokens": 3500, "stream": False}
+        if json_schema:
+            data["response_format"] = {"type": "json_schema", "json_schema": {"schema": json_schema}}
 
         try:
             async with httpx.AsyncClient() as client:
