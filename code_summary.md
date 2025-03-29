@@ -10,7 +10,7 @@ This application is an AI-Powered Product Management Assistant using LLMs for sp
 
 -   **`main.py`**: Application entry point, sets up FastHTML/FastAPI, integrates modules.
 -   **`config.py`**: Manages all application configuration using `pydantic-settings`, loading from `.env`.
--   **`llm_client.py`**: Contains the `AIClient` class, responsible for generic communication with different LLM provider APIs (Gemini, Ollama, LMStudio).
+-   **`llm_client.py`**: Contains the `AIClient` class, responsible for generic communication with different LLM provider APIs (Gemini, Ollama, LMStudio). It now uses `aiohttp` for making requests to the Ollama API.
 -   **`utils.py`**: Common utility functions, including the `get_user` authentication dependency.
 
 ## Web Interface & Authentication

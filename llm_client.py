@@ -4,6 +4,7 @@ import httpx
 import json
 import re
 import logging
+import aiohttp
 from typing import Optional, Any
 from pydantic import SecretStr
 
@@ -108,41 +109,44 @@ class AIClient:
     async def call_ollama(self, system_instruction: str, user_prompt: str) -> str:
         """Calls Ollama Chat API. Returns raw response string or error JSON string."""
         provider = "Ollama"
-        url = f"{self.ollama_url}/api/chat"
+        # Use a hardcoded URL to avoid any URL parsing issues
+        url = "http://127.0.0.1:11434/api/chat"
         messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": user_prompt}]
-        data = {"model": self.ollama_model, "messages": messages, "stream": False, "format": "json", "options": {"temperature": 0.4, "top_k": 40, "top_p": 0.95}}
+        data = {"model": self.ollama_model, "messages": messages, "stream": False, "options": {"temperature": 0.4, "top_k": 40, "top_p": 0.95}}
 
         try:
-            async with httpx.AsyncClient() as client:
-                logger.info(f"Sending request to {provider} Chat API ({self.ollama_model})")
-                response = await client.post(url, json=data, timeout=180.0)
-                logger.info(f"{provider} API response status: {response.status_code}")
-
-                if response.status_code == 200:
-                    try:
-                        result = response.json()
-                        if "message" in result and "content" in result["message"]:
-                             raw_response = result["message"]["content"]
-                             logger.info(f"{provider} raw response received (first 100 chars): {raw_response[:100]}...")
-                             return raw_response
-                        else:
-                             logger.error(f"{provider}: Unexpected chat response structure: {result}")
-                             return create_error_json(f"{provider}: Unexpected chat response structure", result)
-                    except json.JSONDecodeError:
-                        logger.error(f"{provider}: Response body was not valid JSON. Status: {response.status_code}, Response: {response.text[:200]}...")
-                        return create_error_json(f"{provider}: Response body was not valid JSON", response.text[:500])
-                    except Exception as e:
-                         logger.exception(f"{provider}: Error processing response JSON: {e}")
-                         return create_error_json(f"{provider}: Error processing response", str(e))
-                else:
-                    error_text = response.text[:500]
-                    logger.error(f"{provider} API Error: {response.status_code} - {error_text}")
-                    return create_error_json(f"{provider} API Error: {response.status_code}", error_text)
-        except httpx.ReadTimeout:
+            # Use aiohttp instead of httpx
+            async with aiohttp.ClientSession() as session:
+                logger.info(f"Sending request to {provider} Chat API ({self.ollama_model}) at URL: {url}")
+                async with session.post(url, json=data, timeout=180) as response:
+                    logger.info(f"{provider} API response status: {response.status}")
+                    
+                    if response.status == 200:
+                        try:
+                            result = await response.json()
+                            if "message" in result and "content" in result["message"]:
+                                raw_response = result["message"]["content"]
+                                logger.info(f"{provider} raw response received (first 100 chars): {raw_response[:100]}...")
+                                return raw_response
+                            else:
+                                logger.error(f"{provider}: Unexpected chat response structure: {result}")
+                                return create_error_json(f"{provider}: Unexpected chat response structure", result)
+                        except json.JSONDecodeError:
+                            response_text = await response.text()
+                            logger.error(f"{provider}: Response body was not valid JSON. Status: {response.status}, Response: {response_text[:200]}...")
+                            return create_error_json(f"{provider}: Response body was not valid JSON", response_text[:500])
+                        except Exception as e:
+                            logger.exception(f"{provider}: Error processing response JSON: {e}")
+                            return create_error_json(f"{provider}: Error processing response", str(e))
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"{provider} API Error: {response.status} - {error_text[:500]}")
+                        return create_error_json(f"{provider} API Error: {response.status}", error_text[:500])
+        except aiohttp.ClientTimeout:
             logger.error(f"{provider} API request timed out.")
             return create_error_json(f"{provider} API request timed out")
-        except httpx.RequestError as e:
-            logger.error(f"{provider}: Network error calling API: {e}")
+        except aiohttp.ClientError as e:
+            logger.error(f"{provider}: Network error calling API: {e}, URL: {url}")
             return create_error_json(f"{provider}: Network error", str(e))
         except Exception as e:
             logger.exception(f"{provider}: Unexpected error during API call: {e}")

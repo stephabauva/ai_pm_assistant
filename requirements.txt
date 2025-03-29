@@ -10,3 +10,4 @@ httpx
 pytest-mock
 pydantic 
 pydantic-settings
+aiohttp
