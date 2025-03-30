@@ -2,6 +2,8 @@
 
 An AI-powered web application for product managers, focusing on competitive analysis using LLMs with structured outputs via Pydantic AI.
 
+![Image](Screenshot-ui-assist.png)
+
 ## Features
 
 - **Multi-Model Support**: Use Ollama, LMStudio (local), or Gemini (cloud) for AI processing
