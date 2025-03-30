@@ -9,6 +9,9 @@ An AI-powered web application for product managers, focusing on competitive anal
 - **Competitive Analysis**: Get detailed insights about competitors and market trends
 - **Modern UI**: Clean interface built with FastHTML and Tailwind CSS
 - **Google OAuth Authentication**: Secure user authentication
+- **Exception Handling**: Includes exception handlers for HTTP and generic exceptions using Jinja2 templates.
+- **Enhanced Security**: Manually configures `SessionMiddleware` with `same_site` and `https_only` options.
+- **Background Tasks**: Demonstrates how to initiate background tasks for potentially long-running operations.
 
 ## Technical Stack
 
@@ -17,6 +20,8 @@ An AI-powered web application for product managers, focusing on competitive anal
 - **AI Framework**: Pydantic AI for structured outputs
 - **Session Management**: Redis
 - **Authentication**: Google OAuth2
+- **LLM Client**: `aiohttp` for making requests to the Ollama API
+- **Templating**: Jinja2 templates for rendering HTML
 
 ## Getting Started
 
@@ -53,7 +58,7 @@ An AI-powered web application for product managers, focusing on competitive anal
    ```
    cp .env.example .env
    ```
-   Edit `.env` to add your Gemini API key and adjust other settings as needed.
+   Edit `.env` to add your Gemini API key and adjust other settings as needed.  **This is where you specify which local models to use (e.g., `OLLAMA_API_KEY`, `LLMSTUDIO_API_KEY`).**
 
 5. Run the application:
    ```
@@ -70,30 +75,50 @@ This application uses Pydantic AI to create structured outputs from LLM response
 - `MarketTrend`: Model for market trend information
 - `CompetitiveAnalysis`: AI model that structures the complete analysis
 
-Example usage:
-```python
-from ai_agent import AIClient
-
-client = AIClient()
-result = await client.analyze_competition("Analyze CRM market competitors", "ollama")
-```
-
 ## Testing
 
-Run tests with pytest:
+Run integration tests with pytest:
+```bash
+python -m pytest integration_tests
 ```
-pytest
-```
+
+Run API tests:
+1. Ensure Ollama is running (for Ollama API tests).
+   ```bash
+   ollama serve
+   ```
+2. Run the API test scripts:
+   ```bash
+   python api_tests/test_ollama.py
+   python api_tests/test_gemini.py
+   ```
 
 ## Project Structure
 
 - `main.py`: Application entry point
+- `config.py`: Manages application configuration
+- `llm_client.py`: Handles communication with LLM APIs
 - `auth.py`: Google OAuth authentication
 - `dashboard.py`: Main UI components
 - `analysis.py`: LLM query processing
-- `ai_agent.py`: Pydantic AI implementation
+- `agents/`: Directory containing AI agent logic
+- `agents/market_research_agent.py`: Implements the competitive analysis task.
+- `schemas/`: Directory containing Pydantic models
+- `schemas/market_research.py`: Defines Pydantic models for market research.
+- `static/`: Directory containing static files
+- `static/styles.css`: Contains basic CSS styles for the application.
+- `templates/`: Directory containing Jinja2 templates
+- `templates/error.html`: Template for rendering error pages.
 - `utils.py`: Utility functions
-- `tests/`: Test files
+- `api_tests/`: Contains standalone scripts for direct testing of external APIs.
+- `api_tests/test_ollama.py`: Tests the Ollama API.
+- `api_tests/test_gemini.py`: Tests the Gemini API.
+- `integration_tests/`: Contains integration and unit tests for the main application logic.
+- `integration_tests/test_main.py`: Tests web routes, authentication flow, and error handling.
+- `integration_tests/test_market_research_agent.py`: Tests the market research agent functionality.
+- `fasthtml-stubs/`: Contains type stubs for the `fasthtml` library.
+- `fastapi-stubs/`: Contains type stubs for the `fastapi` library.
+- `starlette-stubs/`: Contains type stubs for the `starlette` library.
 
 ## License
 
