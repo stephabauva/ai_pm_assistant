@@ -3,8 +3,11 @@
 from fasthtml.common import *
 # Import necessary types for exception handlers
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse # For returning HTML in error handlers
-from starlette.exceptions import HTTPException as StarletteHTTPException # Import specific type
+from fastapi.responses import HTMLResponse, RedirectResponse
+# Import StaticFiles and Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from auth import add_auth_routes
 from dashboard import add_dashboard_routes
@@ -14,6 +17,7 @@ import uvicorn
 import logging
 import traceback # For logging stack traces
 import json
+import os # Import os for path joining
 
 # Import the global settings instance
 from config import settings
@@ -29,7 +33,47 @@ app, rt = fast_app(
     secret_key=settings.session_secret_key.get_secret_value()
 )
 
+# --- Mount Static Files Directory ---
+# Determine the path to the static directory relative to this file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+# Ensure the static directory exists before mounting (optional but good practice)
+if not os.path.isdir(STATIC_DIR):
+    logger.warning(f"Static directory not found at {STATIC_DIR}. Creating it.")
+    os.makedirs(STATIC_DIR, exist_ok=True) # Create if doesn't exist
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+logger.info(f"Mounted static file directory at /static serving from {STATIC_DIR}")
+
+# Set up templates
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+if not os.path.isdir(TEMPLATES_DIR):
+    logger.warning(f"Templates directory not found at {TEMPLATES_DIR}. Creating it.")
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+logger.info(f"Configured templates directory at {TEMPLATES_DIR}")
+
+
+
 # --- Global Exception Handlers ---
+
+@app.exception_handler(HTTPException)
+async def fastapi_exception_handler(request: Request, exc: HTTPException):
+    """Handles FastAPI's HTTPExceptions."""
+    logger.warning(f"Handling FastAPI HTTPException: Status={exc.status_code}, Detail={exc.detail}")
+    
+    # For other HTTP errors (e.g., 404 Not Found), return a user-friendly HTML page
+    # using the template
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "status_code": exc.status_code,
+            "message": str(exc.detail) or "An error occurred."
+        },
+        status_code=exc.status_code
+    )
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
@@ -41,16 +85,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         return RedirectResponse(url=exc.headers['Location'], status_code=exc.status_code)
 
     # For other HTTP errors (e.g., 404 Not Found), return a user-friendly HTML page
-    # You might want specific handlers for 404, 403, etc.
-    error_content = f"HTTP Error {exc.status_code}: {exc.detail}"
-    # Use Fasthtml components to render the error page
-    page = Title(f"Error {exc.status_code}"), Main(
-        H1(f"Error {exc.status_code}", cls="text-2xl text-red-600"),
-        P(str(exc.detail) or "An error occurred."),
-        A("Go back to Dashboard", href="/", cls="btn mt-4"), # Add a link back home
-        cls="container mx-auto p-8 text-center"
+    # using the template
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "status_code": exc.status_code,
+            "message": str(exc.detail) or "An error occurred."
+        },
+        status_code=exc.status_code
     )
-    return HTMLResponse(content=str(page), status_code=exc.status_code)
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
@@ -91,20 +135,49 @@ async def generic_exception_handler(request: Request, exc: Exception):
         full_response_content = str(error_html) + oob_content
         return HTMLResponse(content=full_response_content, status_code=500)
     else:
-        # For regular page loads, return a full error page
-        page = Title("Internal Server Error"), Main(
-            H1("Internal Server Error", cls="text-2xl text-red-600"),
-            P(error_message),
-            # Optionally add more debug info here too based on environment
-            A("Go back to Dashboard", href="/", cls="btn mt-4"),
-            cls="container mx-auto p-8 text-center"
+        # For regular page loads, return a full error page using the template
+        return templates.TemplateResponse(
+            "error.html",
+            {
+                "request": request,
+                "status_code": 500,
+                "message": error_message
+            },
+            status_code=500
         )
-        return HTMLResponse(content=str(page), status_code=500)
 
+# --- Test Routes for Error Pages ---
+@rt('/trigger_error')
+async def trigger_error(r: Request):
+    """Test route to trigger a 500 error for testing error handling."""
+    # Deliberately cause an error
+    result = 1 / 0
+    return "This will never be returned"
+
+@rt('/test_404')
+async def test_404(r: Request):
+    """Test route to trigger a 404 error for testing error handling."""
+    # Raise a 404 error
+    raise HTTPException(status_code=404, detail="Test 404 error page")
 
 # --- Route Registration ---
 add_auth_routes(rt)
 add_dashboard_routes(rt, get_user)
+add_analysis_routes(rt, get_user)
+
+# --- Catch-all route for 404 errors ---
+@app.exception_handler(404)
+async def not_found_exception_handler(request: Request, exc):
+    """Handle 404 errors for any path not matched by a route."""
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "status_code": 404,
+            "message": "The requested resource was not found."
+        },
+        status_code=404
+    )
 add_analysis_routes(rt, get_user)
 
 # --- Serve the application ---

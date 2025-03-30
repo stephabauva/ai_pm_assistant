@@ -8,9 +8,10 @@ python-dotenv
 requests
 httpx
 pytest-mock
-pydantic 
+pydantic
 pydantic-settings
 aiohttp
+jinja2
 
 #Optional
 ollama
