@@ -1,16 +1,38 @@
+# Secrets and Keys
 client_secret.json
 .env
 *.sesskey
-dump.rdb
+
+# Pycache and compiled files
 __pycache__/
 *.pyc
-ai_pm_assistant/
-.pytest_cache/
+*.pyo
+*.pyd
+.mypy_cache/
 
-.clinerules
+# Database dumps
+dump.rdb
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Python Virtual Environment
+venv/
+env/
+ai_pm_assistant/
+
+# Test artifacts
+.pytest_cache/
+tests/.sesskey
+
+# Roo files
 .roo/
 .rooignore
-tests/.sesskey
-.sesskey
+.clinerules
 
+# Other
 bugs.txt

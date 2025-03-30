@@ -4,6 +4,9 @@ import httpx
 import json
 import os # Keep os for potential other uses, but not getenv here
 import logging
+from typing import Any
+from starlette.requests import Request
+from starlette.responses import RedirectResponse, PlainTextResponse
 # Import the global settings instance
 from config import settings
 
@@ -24,7 +27,7 @@ REDIRECT_URI = f"{str(settings.app_base_url).rstrip('/')}/auth/callback"
 
 def add_auth_routes(rt):
     @rt('/login')
-    async def login(r: Request):
+    async def login(r: Request) -> Any:
         # Redirect to main page if already logged in
         if r.session.get('user_email'):
             return RedirectResponse(url='/')
@@ -57,7 +60,7 @@ def add_auth_routes(rt):
         )
 
     @rt('/auth/callback')
-    async def cb(r: Request, code: str | None = None, error: str | None = None):
+    async def cb(r: Request, code: str | None = None, error: str | None = None) -> Any:
         # Handle potential errors returned from Google
         if error:
             logger.error(f"OAuth callback error from Google: {error}")

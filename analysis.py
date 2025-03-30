@@ -1,11 +1,16 @@
 # ---- File: analysis.py ----
 
 from fasthtml.common import *
+# Import specific components from fasthtml.components
+from fasthtml.components import Script, Group, Pre
+
 from starlette.requests import Request
-from fastapi import Depends, Form
+from starlette.responses import HTMLResponse # Import directly if needed, though Group handles it
+from fastapi import Depends
 import json
 import logging
-import asyncio # Ensure asyncio is imported
+import asyncio
+from typing import Any, Dict, List, Optional # Import needed types
 
 from agents.market_research_agent import analyze_competition as analyze_market_competition
 from utils import get_user
@@ -14,9 +19,17 @@ logger = logging.getLogger(__name__)
 
 # --- Routes ---
 
+# Type hint: Route functions in FastAPI/Starlette often return Response types
+# FastHTML components render to Response implicitly, so 'Any' or 'HTMLResponse' could work.
+# Using 'Any' for flexibility with FastHTML components.
 def add_analysis_routes(rt, get_user):
     @rt('/analyze', methods=['POST'])
-    async def analyze(r: Request, q: str = Form(), model: str = Form(default="ollama"), email: str = Depends(get_user)):
+    async def analyze(r: Request, email: str = Depends(get_user)) -> Any:
+        # Get form data manually
+        form_data = await r.form()
+        q = form_data.get("q", "")
+        model = form_data.get("model", "ollama")
+        
         r.session['selected_llm'] = model
         logger.info(f"Analyze POST request received: model={model}, query='{q[:50]}...' by user {email}")
         valid_models = ["gemini", "ollama", "lmstudio"]
@@ -45,14 +58,18 @@ def add_analysis_routes(rt, get_user):
         return loading_html
 
     @rt('/analyze-result', methods=['POST'])
-    async def analyze_result(r: Request, q: str = Form(), model: str = Form(), email: str = Depends(get_user)):
-        display_content: Html = Div(
+    async def analyze_result(r: Request, email: str = Depends(get_user)) -> Any:
+        # Get form data manually
+        form_data = await r.form()
+        q = form_data.get("q", "")
+        model = form_data.get("model", "ollama")
+        display_content = Div(
                  H3("Application Error", cls="text-xl font-bold mb-3 text-red-600"),
                  P("An unexpected error occurred before processing the response."),
                  id="resp",
                  cls="p-4 bg-white rounded-lg shadow-md text-red-800"
              )
-        result_data = None
+        result_data: Optional[Dict[str, Any]] = None # Add type hint
 
         if q.lower().startswith("test:"):
             logger.info("Test query detected in analyze_result, returning static response")
@@ -70,6 +87,11 @@ def add_analysis_routes(rt, get_user):
                  logger.exception(f"Unexpected error calling agent for model {model}: {e}")
                  result_data = {"error": f"An unexpected error occurred calling the agent: {str(e)}"}
 
+        # Add type hint for analysis dictionary
+        analysis: Optional[Dict[str, Any]] = None
+        if result_data and "structured" in result_data:
+            analysis = result_data["structured"]
+
         if result_data and "error" in result_data:
             error_message = f"Error processing request: {result_data['error']}\n"
             if "details" in result_data and result_data["details"]: error_message += f"\nDetails: {json.dumps(result_data['details'], indent=2)}"
@@ -83,9 +105,8 @@ def add_analysis_routes(rt, get_user):
                 id="resp",
                 cls="p-4 bg-white rounded-lg shadow-md"
             )
-        elif result_data and "structured" in result_data:
-            analysis = result_data["structured"]
-            # --- Corrected Formatting Logic ---
+        elif analysis is not None: # Check if analysis dict exists
+            # --- Formatting Logic ---
             formatted_response = f"""SUMMARY:
 {analysis.get('summary', 'Summary not available')}
 
@@ -110,14 +131,13 @@ MARKET TRENDS:
 RECOMMENDATIONS:
 {"".join([f'- {r}' for r in analysis.get('recommendations', ['No specific recommendations provided'])])}
 """
-            # --- End Corrected Formatting Logic ---
             display_content = Div(
                 H3("Analysis Results", cls="text-xl font-bold mb-3"),
                 Pre(formatted_response, cls="whitespace-pre-wrap bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm"),
                 id="resp",
                 cls="p-4 bg-white rounded-lg shadow-md"
             )
-        # else case is covered by the initial assignment
+        # else case (result_data exists but no 'error' or 'structured') covered by initial assignment
 
         return Group(
             display_content,
@@ -125,13 +145,13 @@ RECOMMENDATIONS:
         )
 
 
-# Helper function remains the same
-def render_model_selection_oob(selected_model: str):
+# Type hint: This helper returns a FastHTML Group component
+def render_model_selection_oob(selected_model: str) -> Group:
      """Helper function to render model selection radio buttons with OOB swap attributes."""
      models = [("ollama", "Ollama (Local)"), ("lmstudio", "LMStudio (Local)"), ("gemini", "Gemini (Cloud)")]
-     buttons = []
+     buttons: List[Any] = [] # List to hold Div components
      for value, label in models:
-         is_checked = selected_model == value
+         is_checked = (selected_model == value)
          buttons.append(
              Div(
                  Label(
@@ -143,4 +163,5 @@ def render_model_selection_oob(selected_model: str):
                  cls="mb-2"
              )
          )
+     # Use tuple unpacking for Group arguments
      return Group(*buttons)

@@ -13,8 +13,8 @@ class Settings(BaseSettings):
 
     # --- AI Keys & URLs ---
     gemini_api_key: Optional[SecretStr] = Field(None, description="API Key for Google Gemini")
-    ollama_url: HttpUrl = Field("http://localhost:11434", description="URL for the Ollama API server")
-    lmstudio_url: HttpUrl = Field("http://localhost:1234/v1", description="URL for the LMStudio OpenAI-compatible API endpoint")
+    ollama_url: HttpUrl = Field(HttpUrl("http://localhost:11434"), description="URL for the Ollama API server")
+    lmstudio_url: HttpUrl = Field(HttpUrl("http://localhost:1234/v1"), description="URL for the LMStudio OpenAI-compatible API endpoint")
 
     # --- AI Model Selection ---
     # Provide defaults, but allow override via .env
@@ -31,30 +31,31 @@ class Settings(BaseSettings):
     # --- Web App ---
     app_host: str = Field("localhost", description="Host for the FastAPI application")
     app_port: PositiveInt = Field(5001, description="Port for the FastAPI application")
-    app_base_url: HttpUrl = Field("http://localhost:5001", description="Base URL of the application (used for OAuth redirect)")
+    app_base_url: HttpUrl = Field(HttpUrl("http://localhost:5001"), description="Base URL of the application (used for OAuth redirect)")
     # Secret key for session middleware - MUST be set in production
-    session_secret_key: SecretStr = Field("default-insecure-secret-key-replace-me", description="Secret key for session management")
+    session_secret_key: SecretStr = Field(SecretStr("default-insecure-secret-key-replace-me"), description="Secret key for session management")
 
     # --- Google OAuth ---
     google_client_id: Optional[str] = Field(None, description="Google OAuth Client ID")
     google_client_secret: Optional[SecretStr] = Field(None, description="Google OAuth Client Secret")
     # These are generally static for Google, but configurable just in case
-    google_auth_uri: HttpUrl = Field("https://accounts.google.com/o/oauth2/v2/auth", description="Google OAuth Authorization URI")
-    google_token_uri: HttpUrl = Field("https://oauth2.googleapis.com/token", description="Google OAuth Token URI")
-    google_userinfo_uri: HttpUrl = Field("https://www.googleapis.com/oauth2/v3/userinfo", description="Google OAuth UserInfo URI")
+    google_auth_uri: HttpUrl = Field(HttpUrl("https://accounts.google.com/o/oauth2/v2/auth"), description="Google OAuth Authorization URI")
+    google_token_uri: HttpUrl = Field(HttpUrl("https://oauth2.googleapis.com/token"), description="Google OAuth Token URI")
+    google_userinfo_uri: HttpUrl = Field(HttpUrl("https://www.googleapis.com/oauth2/v3/userinfo"), description="Google OAuth UserInfo URI")
 
     # --- Pydantic Settings Configuration ---
-    class Config:
+    model_config = {
         # Load from .env file if it exists
-        env_file = '.env'
-        env_file_encoding = 'utf-8'
+        "env_file": '.env',
+        "env_file_encoding": 'utf-8',
         # Allow extra fields (though we aim to define all)
-        extra = 'ignore'
+        "extra": 'ignore',
         # Make SecretStr fields case-insensitive loading from env
-        case_sensitive = False # Primarily for environment variables
+        "case_sensitive": False # Primarily for environment variables
+    }
 
 # Create a single instance of the settings to be imported by other modules
-settings = Settings()
+settings = Settings()  # type: ignore
 
 # --- Perform some basic validation checks ---
 if settings.google_client_id is None or settings.google_client_secret is None:

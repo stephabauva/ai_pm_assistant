@@ -1,6 +1,7 @@
 from fasthtml.common import *
 from fastapi import Depends
 from starlette.requests import Request
+from typing import Any
 
 # Removed Tailwind CSS CDN link
 
@@ -9,7 +10,7 @@ local_css = Link(rel="stylesheet", href="/static/styles.css")
 
 def add_dashboard_routes(rt, get_user):
     @rt('/')
-    async def dash(r: Request, email: str = Depends(get_user)):
+    async def dash(r: Request, email: str = Depends(get_user)) -> Any:
         selected_model = r.session.get('selected_llm', 'ollama')
         # Basic structure using FastHTML components and Tailwind classes
         # Assumes styles.css contains necessary Tailwind classes or custom styles

@@ -1,6 +1,6 @@
 # ---- File: main.py ----
 
-from fasthtml.common import *
+from fasthtml.common import fast_app, Div, H3, P
 # Import necessary types for exception handlers
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -59,13 +59,13 @@ logger.info(f"Configured templates directory at {TEMPLATES_DIR}")
 # --- Global Exception Handlers ---
 
 @app.exception_handler(HTTPException)
-async def fastapi_exception_handler(request: Request, exc: HTTPException):
+async def fastapi_exception_handler(request: Request, exc: HTTPException) -> HTMLResponse:
     """Handles FastAPI's HTTPExceptions."""
     logger.warning(f"Handling FastAPI HTTPException: Status={exc.status_code}, Detail={exc.detail}")
-    
+
     # For other HTTP errors (e.g., 404 Not Found), return a user-friendly HTML page
     # using the template
-    return templates.TemplateResponse(
+    response: HTMLResponse = templates.TemplateResponse(
         "error.html",
         {
             "request": request,
@@ -74,19 +74,21 @@ async def fastapi_exception_handler(request: Request, exc: HTTPException):
         },
         status_code=exc.status_code
     )
+    return response
 
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> HTMLResponse | RedirectResponse:
     """Handles FastAPI's built-in HTTPExceptions (like redirects or 404s)."""
     logger.warning(f"Handling HTTPException: Status={exc.status_code}, Detail={exc.detail}")
     # For redirects (like in get_user), let the browser handle it
-    if 300 <= exc.status_code < 400 and 'Location' in exc.headers:
+    if 300 <= exc.status_code < 400 and exc.headers is not None and 'Location' in exc.headers:
         # Re-create the redirect response FastHTML understands
-        return RedirectResponse(url=exc.headers['Location'], status_code=exc.status_code)
+        redirect: RedirectResponse = RedirectResponse(url=exc.headers['Location'], status_code=exc.status_code)
+        return redirect
 
     # For other HTTP errors (e.g., 404 Not Found), return a user-friendly HTML page
     # using the template
-    return templates.TemplateResponse(
+    response: HTMLResponse = templates.TemplateResponse(
         "error.html",
         {
             "request": request,
@@ -95,9 +97,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         },
         status_code=exc.status_code
     )
+    return response
 
 @app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
+async def generic_exception_handler(request: Request, exc: Exception) -> HTMLResponse:
     """Handles unexpected non-HTTP exceptions."""
     # Log the full traceback for unexpected errors
     tb_str = traceback.format_exc()
@@ -133,10 +136,11 @@ async def generic_exception_handler(request: Request, exc: Exception):
         )
         # Return the main error content plus any OOB swaps
         full_response_content = str(error_html) + oob_content
-        return HTMLResponse(content=full_response_content, status_code=500)
+        response: HTMLResponse = HTMLResponse(content=full_response_content, status_code=500)
+        return response
     else:
         # For regular page loads, return a full error page using the template
-        return templates.TemplateResponse(
+        template_response: HTMLResponse = templates.TemplateResponse(
             "error.html",
             {
                 "request": request,
@@ -145,17 +149,18 @@ async def generic_exception_handler(request: Request, exc: Exception):
             },
             status_code=500
         )
+        return template_response
 
 # --- Test Routes for Error Pages ---
 @rt('/trigger_error')
-async def trigger_error(r: Request):
+async def trigger_error(r: Request) -> str:
     """Test route to trigger a 500 error for testing error handling."""
     # Deliberately cause an error
     result = 1 / 0
     return "This will never be returned"
 
 @rt('/test_404')
-async def test_404(r: Request):
+async def test_404(r: Request) -> None:
     """Test route to trigger a 404 error for testing error handling."""
     # Raise a 404 error
     raise HTTPException(status_code=404, detail="Test 404 error page")
@@ -167,9 +172,9 @@ add_analysis_routes(rt, get_user)
 
 # --- Catch-all route for 404 errors ---
 @app.exception_handler(404)
-async def not_found_exception_handler(request: Request, exc):
+async def not_found_exception_handler(request: Request, exc) -> HTMLResponse:
     """Handle 404 errors for any path not matched by a route."""
-    return templates.TemplateResponse(
+    response: HTMLResponse = templates.TemplateResponse(
         "error.html",
         {
             "request": request,
@@ -178,6 +183,7 @@ async def not_found_exception_handler(request: Request, exc):
         },
         status_code=404
     )
+    return response
 add_analysis_routes(rt, get_user)
 
 # --- Serve the application ---

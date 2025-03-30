@@ -1,0 +1,1 @@
+"""Type stubs for fasthtml package."""
