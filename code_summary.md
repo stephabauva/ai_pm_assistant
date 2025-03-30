@@ -17,7 +17,7 @@ This application is an AI-Powered Product Management Assistant using LLMs for sp
 
 -   **`auth.py`**: Manages Google OAuth2 authentication flow using settings from `config.py`.
 -   **`dashboard.py`**: Renders the main dashboard UI (currently focused on competitive analysis).
--   **`analysis.py`**: Defines the web routes (`/analyze`, `/analyze-result`) for initiating analysis tasks. It acts as a bridge between the web request and the appropriate agent, handling loading states and formatting results/errors for the UI.
+-   **`analysis.py`**: Defines the web routes (`/analyze`, `/analyze-result`) for initiating analysis tasks. The `/analyze` route initiates the analysis and uses HTMX to poll the `/analyze-result` route. The `/analyze-result` route either returns the analysis result or keeps the poll alive. It acts as a bridge between the web request and the appropriate agent, handling loading states and formatting results/errors for the UI. It also demonstrates how to initiate background tasks for potentially long-running operations.
 
 ## Agent System
 

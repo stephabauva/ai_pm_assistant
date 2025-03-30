@@ -5,6 +5,7 @@ from starlette.requests import Request
 from fastapi import Depends, Form
 import json
 import logging
+import asyncio # Ensure asyncio is imported
 
 from agents.market_research_agent import analyze_competition as analyze_market_competition
 from utils import get_user
@@ -16,78 +17,64 @@ logger = logging.getLogger(__name__)
 def add_analysis_routes(rt, get_user):
     @rt('/analyze', methods=['POST'])
     async def analyze(r: Request, q: str = Form(), model: str = Form(default="ollama"), email: str = Depends(get_user)):
-        # ... (analyze route remains the same) ...
         r.session['selected_llm'] = model
         logger.info(f"Analyze POST request received: model={model}, query='{q[:50]}...' by user {email}")
         valid_models = ["gemini", "ollama", "lmstudio"]
         if model not in valid_models:
              logger.warning(f"Invalid model '{model}' selected in form.")
-             # Let the analyze_result endpoint handle displaying the error via agent call failure
-             pass
+             pass # Allow agent to handle for now
 
         loading_html = Div(
             H3("Analysis in Progress...", cls="text-xl font-bold mb-3 text-blue-600"),
             Div(
                 Div(cls="animate-pulse h-2 bg-blue-200 rounded w-full mb-4"),
+                P(f"Contacting {model} model and processing query. Please wait...", cls="text-gray-700 font-medium mb-3"),
+                P("Results will appear below automatically.", cls="text-sm text-gray-500 mt-4"),
                 Div(
-                    P(f"Contacting {model} model and processing your query...", cls="text-gray-700 font-medium mb-3"),
-                    P("Please wait, this may take 10-60 seconds...", cls="text-sm text-gray-500 mt-4"),
-                    cls="p-4 bg-white rounded-lg border border-blue-200"
+                    hx_post="/analyze-result",
+                    hx_trigger="load delay:200ms, every 2s",
+                    hx_target="#resp",
+                    hx_swap="outerHTML",
+                    hx_vals=json.dumps({"q": q, "model": model}),
                 ),
-                Script(f"""
-                console.log("Triggering result fetch for model={model} q={q.replace('"', '"')}...");
-                setTimeout(function() {{
-                    htmx.ajax('POST', '/analyze-result', {{
-                        target:'#resp',
-                        values: {{ q: '{q.replace("'", "\\'")}', model: '{model}' }}
-                    }});
-                }}, 500);
-                """),
-                id="resp",
-                cls="p-4 bg-white rounded-lg shadow-md"
-            )
+                cls="p-4 bg-white rounded-lg border border-blue-200"
+            ),
+            id="resp",
+            cls="p-4 bg-white rounded-lg shadow-md"
         )
         return loading_html
 
-
     @rt('/analyze-result', methods=['POST'])
     async def analyze_result(r: Request, q: str = Form(), model: str = Form(), email: str = Depends(get_user)):
-        logger.info(f"Analyze-Result POST received: model={model}, query='{q[:50]}...' by user {email}")
-
-        # Default display_content to an error state in case agent call fails unexpectedly
         display_content: Html = Div(
                  H3("Application Error", cls="text-xl font-bold mb-3 text-red-600"),
                  P("An unexpected error occurred before processing the response."),
                  id="resp",
                  cls="p-4 bg-white rounded-lg shadow-md text-red-800"
              )
-        result_data = None # Initialize result_data
+        result_data = None
 
-        # --- Call the specific agent ---
         if q.lower().startswith("test:"):
             logger.info("Test query detected in analyze_result, returning static response")
+            await asyncio.sleep(1)
             result_data = {
                  "structured": {"summary": "Static test response.", "competitors": [], "market_trends": [], "recommendations": ["Use real queries."]},
                  "raw": "Test Query Processed"
             }
         else:
             try:
+                logger.info(f"Analyze-Result POST executing analysis: model={model}, query='{q[:50]}...'")
                 result_data = await analyze_market_competition(query=q, model=model)
                 logger.info(f"Agent result processing complete for model {model}. Keys: {result_data.keys()}")
             except Exception as e:
                  logger.exception(f"Unexpected error calling agent for model {model}: {e}")
-                 # Use the error result structure the rest of the code expects
                  result_data = {"error": f"An unexpected error occurred calling the agent: {str(e)}"}
 
-        # --- Format response based on agent result ---
         if result_data and "error" in result_data:
             error_message = f"Error processing request: {result_data['error']}\n"
-            if "details" in result_data and result_data["details"]:
-                 error_message += f"\nDetails: {json.dumps(result_data['details'], indent=2)}"
-            elif "raw" in result_data and result_data["raw"]:
-                 error_message += f"\nRaw response snippet:\n{result_data['raw'][:500]}..."
-            if "validation_errors" in result_data:
-                 error_message += f"\nValidation Details: {json.dumps(result_data['validation_errors'], indent=2)}"
+            if "details" in result_data and result_data["details"]: error_message += f"\nDetails: {json.dumps(result_data['details'], indent=2)}"
+            elif "raw" in result_data and result_data["raw"]: error_message += f"\nRaw response snippet:\n{result_data['raw'][:500]}..."
+            if "validation_errors" in result_data: error_message += f"\nValidation Details: {json.dumps(result_data['validation_errors'], indent=2)}"
 
             logger.warning(f"Displaying error to user: {error_message[:150]}...")
             display_content = Div(
@@ -97,8 +84,8 @@ def add_analysis_routes(rt, get_user):
                 cls="p-4 bg-white rounded-lg shadow-md"
             )
         elif result_data and "structured" in result_data:
-            # ... (formatting logic remains the same) ...
             analysis = result_data["structured"]
+            # --- Corrected Formatting Logic ---
             formatted_response = f"""SUMMARY:
 {analysis.get('summary', 'Summary not available')}
 
@@ -123,16 +110,15 @@ MARKET TRENDS:
 RECOMMENDATIONS:
 {"".join([f'- {r}' for r in analysis.get('recommendations', ['No specific recommendations provided'])])}
 """
+            # --- End Corrected Formatting Logic ---
             display_content = Div(
                 H3("Analysis Results", cls="text-xl font-bold mb-3"),
                 Pre(formatted_response, cls="whitespace-pre-wrap bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm"),
                 id="resp",
                 cls="p-4 bg-white rounded-lg shadow-md"
             )
-        # else case is covered by the initial assignment to display_content
+        # else case is covered by the initial assignment
 
-
-        # --- Return the results content and OOB updates for radio buttons ---
         return Group(
             display_content,
             render_model_selection_oob(model)
@@ -141,7 +127,7 @@ RECOMMENDATIONS:
 
 # Helper function remains the same
 def render_model_selection_oob(selected_model: str):
-     # ... (render_model_selection_oob remains the same) ...
+     """Helper function to render model selection radio buttons with OOB swap attributes."""
      models = [("ollama", "Ollama (Local)"), ("lmstudio", "LMStudio (Local)"), ("gemini", "Gemini (Cloud)")]
      buttons = []
      for value, label in models:
