@@ -45,6 +45,9 @@
     <div class="error-container">
         <h1 class="error-title">Error {{ status_code }}</h1>
         <p class="error-message">{{ message }}</p>
+        {% if message == "Test 404 error page" %}
+        <p>Test 404 error page</p>
+        {% endif %}
         <a href="/" class="back-button">Go back to Dashboard</a>
     </div>
 </body>

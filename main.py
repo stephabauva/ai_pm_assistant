@@ -162,7 +162,7 @@ async def trigger_error(r: Request) -> str:
 @rt('/test_404')
 async def test_404(r: Request) -> None:
     """Test route to trigger a 404 error for testing error handling."""
-    # Raise a 404 error
+    # Raise a 404 error with specific detail message for test
     raise HTTPException(status_code=404, detail="Test 404 error page")
 
 # --- Route Registration ---
@@ -184,7 +184,6 @@ async def not_found_exception_handler(request: Request, exc) -> HTMLResponse:
         status_code=404
     )
     return response
-add_analysis_routes(rt, get_user)
 
 # --- Serve the application ---
 def serve():

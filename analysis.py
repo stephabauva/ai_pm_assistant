@@ -55,7 +55,11 @@ def add_analysis_routes(rt, get_user):
             id="resp",
             cls="p-4 bg-white rounded-lg shadow-md"
         )
-        return loading_html
+        # Return both the loading HTML and the model selection radio buttons
+        return Group(
+            loading_html,
+            render_model_selection_oob(model)
+        )
 
     @rt('/analyze-result', methods=['POST'])
     async def analyze_result(r: Request, email: str = Depends(get_user)) -> Any:

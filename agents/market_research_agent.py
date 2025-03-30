@@ -125,7 +125,7 @@ async def analyze_competition(query: str, model: str) -> Dict[str, Any]:
                     except json.JSONDecodeError as e:
                         logger.error(f"Market Research Agent: Failed to decode cleaned JSON from {model}: {e}", exc_info=False)
                         logger.error(f"Cleaned response snippet: {cleaned_response[:1000]}...")
-                        error_result = {"error": f"LLM {model} returned invalid JSON.", "raw": raw_response}
+                        error_result = {"error": f"LLM {model} returned invalid JSON", "raw": raw_response}
 
     except Exception as e:
         logger.exception(f"Market Research Agent: Unexpected error during analysis for model {model}: {e}")
