@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from starlette.middleware.sessions import SessionMiddleware # Import middleware directly for options
 from auth import add_auth_routes
 from dashboard import add_dashboard_routes
 from analysis import add_analysis_routes, render_model_selection_oob # Import helper
@@ -27,10 +28,23 @@ from config import settings
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s')
 logger = logging.getLogger(__name__)
 
-# Initialize FastHTML app with session middleware
+# Initialize FastHTML app
 app, rt = fast_app(
-    with_session=True,
-    secret_key=settings.session_secret_key.get_secret_value()
+    # with_session=False, # Don't let fast_app add default session middleware
+    # secret_key=settings.session_secret_key.get_secret_value()
+)
+
+# --- Add Session Middleware Manually with Secure Options ---
+# Note: 'secure=True' requires HTTPS. Set https_only=True for stricter enforcement.
+# 'samesite'='lax' is a good default, 'strict' is more secure but can break some cross-site workflows.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret_key.get_secret_value(),
+    session_cookie="session", # Default cookie name
+    max_age=14 * 24 * 60 * 60,  # Example: 14 days expiration
+    same_site="lax", # Good default: 'strict', 'lax', or 'none'
+    https_only=False # Set to True ONLY if served over HTTPS
+    # secure=True # Deprecated in favour of https_only - DO NOT USE BOTH WITH https_only=True
 )
 
 # --- Mount Static Files Directory ---

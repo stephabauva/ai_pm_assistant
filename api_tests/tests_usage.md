@@ -18,7 +18,7 @@ This script directly tests the Ollama API to ensure it is functioning correctly.
     ```
 2.  In a separate terminal, run the script:
     ```bash
-    python test_ollama.py
+    python api_tests/test_ollama.py
     ```
 
 ### Expected Output
@@ -55,7 +55,7 @@ This script directly tests the Gemini API.
 1. Set the `GEMINI_API_KEY` in the `.env` file.
 2. Run the script:
    ```bash
-   python test_gemini.py
+   python api_tests/test_gemini.py
    ```
 
 ### Expected Output

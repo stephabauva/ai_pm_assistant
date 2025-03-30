@@ -8,7 +8,7 @@ This application is an AI-Powered Product Management Assistant using LLMs for sp
 
 ## Core Components
 
--   **`main.py`**: Application entry point, sets up FastHTML/FastAPI, integrates modules. Includes exception handlers for HTTP and generic exceptions using Jinja2 templates, and mounts the `static` directory for serving static files. Test routes `/trigger_error` and `/test_404` have been added to facilitate testing of error handlers. Return types have been added to the route functions. Fixed duplicate route registration issue.
+-   **`main.py`**: Application entry point, sets up FastHTML/FastAPI, integrates modules. Manually configures `SessionMiddleware` with `same_site` and `https_only` options for enhanced security. Includes exception handlers for HTTP and generic exceptions using Jinja2 templates, and mounts the `static` directory for serving static files. Test routes `/trigger_error` and `/test_404` have been added to facilitate testing of error handlers. Return types have been added to the route functions. Fixed duplicate route registration issue.
 -   **`config.py`**: Manages all application configuration using `pydantic-settings`, loading from `.env`.
 -   **`llm_client.py`**: Contains the `AIClient` class, responsible for generic communication with different LLM provider APIs (Gemini, Ollama, LMStudio). It now uses `aiohttp` for making requests to the Ollama API. Return types and type hints have been added. URL construction has been fixed to handle trailing slashes in base URLs to prevent 404 errors.
 -   **`utils.py`**: Common utility functions, including the `get_user` authentication dependency that raises HTTPException with a 307 status code for unauthenticated users.
